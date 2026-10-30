@@ -1,0 +1,50 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "outputDirectory": "public",
+  "functions": {
+    "api/data.js": {
+      "maxDuration": 300
+    },
+    "api/google.js": {
+      "maxDuration": 300
+    },
+    "api/send.js": {
+      "maxDuration": 300
+    },
+    "api/session.js": {
+      "maxDuration": 300
+    },
+    "api/sync.js": {
+      "maxDuration": 300
+    },
+    "api/import.js": {
+      "maxDuration": 300,
+      "includeFiles": "seed/**"
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/sync?cron=1",
+      "schedule": "30 14 * * *"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "same-origin"
+        }
+      ]
+    }
+  ]
+}
