@@ -2,6 +2,7 @@ import { json, guarded, body, HttpError } from '../lib/http.js';
 import { loadDb, mutateDb, loadAuth } from '../lib/db.js';
 import { encrypt } from '../lib/crypto.js';
 import { verifyEmail, providerCredits, normalizeEmail } from '../lib/verify.js';
+import { listMessages, getMeta } from '../lib/gmail.js';
 import { publicDb, addEvent, advance, setStatus, domainOf, STATUSES, phoneKey, nameKey } from '../lib/model.js';
 
 const LEAD_FIELDS = ['company', 'firstName', 'lastName', 'title', 'email', 'phone', 'website', 'industry', 'city', 'state', 'notes', 'tags', 'linkedin'];
@@ -35,6 +36,65 @@ export const POST = guarded(async (request) => {
       addEvent(l, { type: 'verified', result: l.verification.status, reason: v.reason });
     });
     return json({ ok: true, result: v, data: await view() });
+  }
+
+  // Proof by delivery: an address we already emailed from this Gmail that never bounced is deliverable.
+  // Only counts sends at least 24h old, so a late bounce can't be missed.
+  if (a === 'deliveryCheck') {
+    const { db } = await loadDb();
+    const ids = (b.ids || []).slice(0, 40);
+    const out = [];
+    for (const id of ids) {
+      const l = db.leads.find((x) => x.id === id);
+      if (!l || !l.email) { out.push({ id, result: 'skip', reason: 'no email' }); continue; }
+      const e = l.email.toLowerCase();
+      const sent = await listMessages(db.settings, `in:sent to:${e}`, 50);
+      const bounces = await listMessages(db.settings, `from:(mailer-daemon OR postmaster) "${e}"`, 20);
+      let oldest = null;
+      if (sent.length) {
+        const metas = await Promise.all(sent.slice(-3).map((m) => getMeta(db.settings, m.id, ['To'])));
+        oldest = Math.min(...metas.map((m) => m.internalDate));
+      }
+      if (bounces.length) out.push({ id, result: 'rejected', reason: `Bounced when emailed from Gmail (${bounces.length} bounce notice${bounces.length > 1 ? 's' : ''})` });
+      else if (sent.length && oldest && Date.now() - oldest > 864e5) out.push({ id, result: 'valid', reason: `Delivered: emailed from Gmail on ${new Date(oldest).toISOString().slice(0, 10)}, no bounce`, provider: 'gmail-delivery' });
+      else if (sent.length) out.push({ id, result: 'pending', reason: 'Emailed less than 24h ago, check again tomorrow' });
+      else out.push({ id, result: 'unknown', reason: 'Not found in Gmail Sent' });
+    }
+    await mutateDb((d) => {
+      for (const r of out) {
+        if (r.result !== 'valid' && r.result !== 'rejected') continue;
+        const l = d.leads.find((x) => x.id === r.id);
+        if (!l) continue;
+        l.verification = { status: r.result, reason: r.reason, checkedAt: Date.now(), provider: r.provider || 'gmail-delivery' };
+        addEvent(l, { type: 'verified', result: r.result, reason: r.reason });
+        if (r.result === 'rejected' && !['client', 'meeting', 'replied'].includes(l.status)) { setStatus(l, 'bounced', true); l.nextFollowUpAt = null; }
+      }
+    });
+    return json({ ok: true, results: out });
+  }
+
+  // Records a verification done outside the app (e.g. Apollo's mailbox check) with its evidence,
+  // and optionally fills in the contact found by research. Never marks valid without a provider and reason.
+  if (a === 'recordVerification') {
+    const items = (b.items || []).slice(0, 100);
+    const { result } = await mutateDb((d) => {
+      const res = [];
+      for (const it of items) {
+        const l = d.leads.find((x) => x.id === it.id);
+        if (!l) { res.push({ id: it.id, ok: false, error: 'not found' }); continue; }
+        if (!['valid', 'rejected', 'unverified'].includes(it.status) || !it.provider || !it.reason) { res.push({ id: it.id, ok: false, error: 'status, provider and reason are required' }); continue; }
+        const email = normalizeEmail(it.email || l.email);
+        if (it.status === 'valid' && !/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(email)) { res.push({ id: it.id, ok: false, error: 'bad email' }); continue; }
+        if (email && d.leads.some((x) => x.id !== l.id && x.email === email)) { res.push({ id: it.id, ok: false, error: 'email used by another lead' }); continue; }
+        for (const k of ['firstName', 'lastName', 'title', 'website', 'linkedin']) if (it[k]) l[k] = String(it[k]).trim();
+        if (email && email !== l.email) { addEvent(l, { type: 'note', text: `Email found: ${email} (${it.source || it.provider})` }); l.email = email; }
+        l.verification = { status: it.status, reason: String(it.reason).slice(0, 300), checkedAt: Date.now(), provider: it.provider };
+        addEvent(l, { type: 'verified', result: it.status, reason: l.verification.reason });
+        res.push({ id: it.id, ok: true });
+      }
+      return res;
+    });
+    return json({ ok: true, results: result });
   }
 
   if (a === 'credits') {
