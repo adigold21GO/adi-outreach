@@ -135,6 +135,14 @@ test('end to end', async () => {
   const ann = d.leads.find((l) => l.email === 'ann@goodco.com');
   assert.equal(ann.verification.status, 'valid');
 
+  // a template with a non-merge placeholder never ships
+  await call(data.POST, '/api/data', 'POST', { action: 'saveSettings', settings: { fromName: 'Test Sender', signature: 'Test Sender' } });
+  await call(data.POST, '/api/data', 'POST', { action: 'saveTemplate', template: { id: 'first-touch', name: 'First email', kind: 'first', subject: 'Quick question about {company}', body: 'Hi {first_name}, I noticed {specific detail about their business}. How do you handle {task}?' } });
+  r = await call(send.POST, '/api/send', 'POST', { leadId: ann.id, templateId: 'first-touch' });
+  assert.match(r.j.error, /unfilled text: \{specific detail about their business\}, \{task\}/);
+  await call(data.POST, '/api/data', 'POST', { action: 'saveTemplate', template: { id: 'first-touch', name: 'First email', kind: 'first', subject: 'Quick question about {company}', body: 'Hi {first_name},\n\nShort intro about {task}.' } });
+  await call(data.POST, '/api/data', 'POST', { action: 'updateLead', id: ann.id, patch: { task: 'after-hours calls' } });
+  await call(data.POST, '/api/data', 'POST', { action: 'saveSettings', settings: { fromName: '', signature: '' } });
   // blocked until sender identity is set
   r = await call(send.POST, '/api/send', 'POST', { leadId: ann.id, templateId: 'first-touch' });
   assert.equal(r.status, 409); assert.match(r.j.error, /From name and signature/);
@@ -167,7 +175,7 @@ test('end to end', async () => {
   const mime = Buffer.from(sentRaw[0].raw, 'base64url').toString();
   assert.match(mime, /To: ann@goodco.com/); assert.match(mime, /Subject: Quick question about Good Co/);
   const bodyText = Buffer.from(mime.split('\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString();
-  assert.match(bodyText, /^Hi Ann,/); assert.match(bodyText, /PO Box 1/); assert.match(bodyText, /unsubscribe/);
+  assert.match(bodyText, /^Hi Ann,/); assert.match(bodyText, /Short intro about after-hours calls\./); assert.match(bodyText, /PO Box 1/); assert.match(bodyText, /unsubscribe/);
   // duplicate first send blocked
   r = await call(send.POST, '/api/send', 'POST', { leadId: ann.id, templateId: 'first-touch' });
   assert.equal(r.status, 409); assert.match(r.j.error, /already sent/);
@@ -182,6 +190,9 @@ test('end to end', async () => {
   // cap = 3
   const cy = d.leads.find((l) => l.email === 'cy.owner@gmail.com');
   const di = d.leads.find((l) => l.email === 'di@third.com');
+  r = await call(send.POST, '/api/send', 'POST', { leadId: cy.id, templateId: 'first-touch' });
+  assert.match(r.j.error, /unfilled text: \{task\}/);
+  for (const x of [cy, di]) await call(data.POST, '/api/data', 'POST', { action: 'updateLead', id: x.id, patch: { task: 'booking' } });
   r = await call(send.POST, '/api/send', 'POST', { leadId: cy.id, templateId: 'first-touch' });
   assert.equal(r.status, 200);
   r = await call(send.POST, '/api/send', 'POST', { leadId: di.id, templateId: 'first-touch' });

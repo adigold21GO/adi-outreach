@@ -49,8 +49,8 @@ const tplFollow = () => D.templates.find((t) => t.kind === 'followup');
 
 function renderTpl(t, l) {
   const s = D.settings;
-  const vars = { first_name: (l.firstName || '').trim() || 'there', last_name: l.lastName || '', company: l.company || 'your business', city: l.city || '', industry: l.industry || '', title: l.title || '', my_name: s.fromName || '' };
-  const fill = (x) => String(x || '').replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+  const vars = { first_name: (l.firstName || '').trim() || 'there', last_name: l.lastName || '', company: l.company || 'your business', city: l.city || '', industry: l.industry || '', title: l.title || '', my_name: s.fromName || '', detail: (l.detail || '').trim(), task: (l.task || '').trim() };
+  const fill = (x) => String(x || '').replace(/\{(\w+)\}/g, (m, k) => (k in vars && vars[k] !== '' ? vars[k] : m));
   const legal = [s.mailingAddress?.trim() || '[your mailing address, set in Settings]', 'If you would rather not hear from me, reply "unsubscribe" and I won\'t email again.'].join('\n');
   return { subject: fill(t.subject), body: `${fill(t.body).trim()}\n\n${(s.signature || '').trim()}\n\n${legal}` };
 }
@@ -384,6 +384,8 @@ function drawer() {
 
     <div class="section"><h2>Contact</h2><div class="fields">
       ${f('firstName', 'First name')}${f('lastName', 'Last name')}${f('title', 'Title')}${f('email', 'Email', 'email')}${f('phone', 'Phone', 'tel')}${f('website', 'Website')}${f('industry', 'Industry')}${f('city', 'City')}</div>
+      <label>Personalization: {detail} (something specific you noticed about them)</label><input data-f="detail" value="${esc(l.detail || '')}" placeholder="e.g. you run three locations and take bookings by phone">
+      <label>Personalization: {task} (the job you'd help with)</label><input data-f="task" value="${esc(l.task || '')}" placeholder="e.g. after-hours calls and appointment requests">
       <label>Notes</label><textarea data-f="notes">${esc(l.notes || '')}</textarea>
       <div class="row" style="margin-top:8px"><button class="btn" data-act="saveLead">Save changes</button>
       ${l.phone ? `<a class="btn" href="tel:${esc(l.phone.replace(/[^\d+]/g, ''))}">Call ${esc(l.phone)}</a>` : ''}</div></div>
@@ -460,7 +462,7 @@ function vTemplates() {
   UI.tplId = t?.id;
   const sample = D.leads.find((l) => l.firstName && l.company) || { firstName: 'Maria', company: 'Lone Star Dental', city: 'Dallas', industry: 'Dental' };
   const m = t ? renderTpl(t, sample) : { subject: '', body: '' };
-  return `<h1>Templates</h1><p class="sub">Merge fields: <code>{first_name}</code> <code>{company}</code> <code>{city}</code> <code>{industry}</code> <code>{title}</code>. Your signature and the unsubscribe line are added automatically.</p>
+  return `<h1>Templates</h1><p class="sub">Merge fields: <code>{first_name}</code> <code>{company}</code> <code>{city}</code> <code>{industry}</code> <code>{title}</code> <code>{detail}</code> <code>{task}</code> (the last two are filled per lead). Any field left unfilled blocks the send. Your signature and the unsubscribe line are added automatically.</p>
   <div class="grid g2"><div class="card">
     <div class="row">${D.templates.map((x) => `<button class="btn small ${x.id === t?.id ? 'primary' : ''}" data-act="pickTpl" data-id="${x.id}">${esc(x.name)}</button>`).join('')}<button class="btn small" data-act="newTpl">+ New</button></div>
     ${t ? `<label>Name</label><input id="tName" value="${esc(t.name)}">

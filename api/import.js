@@ -22,6 +22,8 @@ function clean(c) {
     state: STR(c.state, 40),
     linkedin: STR(c.linkedin, 300),
     notes: STR(c.notes, 2000),
+    detail: STR(c.detail, 200),
+    task: STR(c.task, 120),
     source: STR(c.source, 80),
   };
 }

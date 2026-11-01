@@ -5,7 +5,7 @@ import { verifyEmail, providerCredits, normalizeEmail } from '../lib/verify.js';
 import { listMessages, getMeta } from '../lib/gmail.js';
 import { publicDb, addEvent, advance, setStatus, domainOf, STATUSES, phoneKey, nameKey } from '../lib/model.js';
 
-const LEAD_FIELDS = ['company', 'firstName', 'lastName', 'title', 'email', 'phone', 'website', 'industry', 'city', 'state', 'notes', 'tags', 'linkedin'];
+const LEAD_FIELDS = ['company', 'firstName', 'lastName', 'title', 'email', 'phone', 'website', 'industry', 'city', 'state', 'notes', 'tags', 'linkedin', 'detail', 'task'];
 const CALL_OUTCOMES = ['no_answer', 'voicemail', 'talked', 'booked', 'not_interested', 'wrong_number', 'call_back'];
 
 async function view() {
