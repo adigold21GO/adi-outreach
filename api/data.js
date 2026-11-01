@@ -73,6 +73,47 @@ export const POST = guarded(async (request) => {
     return json({ ok: true, results: out });
   }
 
+  // Links leads imported from Volvera to their original Gmail thread so a follow-up replies in-thread,
+  // and schedules the follow-up. Only for leads emailed exactly once, at least 5 days ago, with no
+  // reply, call or bounce, and a delivery-verified address.
+  if (a === 'linkThreads') {
+    const { db } = await loadDb();
+    const sends = (l) => (l.history || []).filter((h) => h.type === 'email_sent');
+    const ids = (b.ids || []).slice(0, 25);
+    const found = [];
+    for (const id of ids) {
+      const l = db.leads.find((x) => x.id === id);
+      if (!l || !l.email) { found.push({ id, ok: false, reason: 'no email' }); continue; }
+      const s = sends(l);
+      const touched = (l.history || []).some((h) => ['reply', 'bounce', 'auto_reply'].includes(h.type) || (h.type === 'call' && ['talked', 'booked', 'not_interested'].includes(h.outcome)));
+      if (l.status !== 'contacted' || s.length !== 1 || touched || l.verification?.status !== 'valid' || Date.now() - s[0].t < 5 * 864e5) { found.push({ id, ok: false, reason: 'not eligible' }); continue; }
+      const msgs = await listMessages(db.settings, `in:sent to:${l.email.toLowerCase()}`, 10);
+      if (!msgs.length) { found.push({ id, ok: false, reason: 'original email not in Gmail Sent' }); continue; }
+      const metas = await Promise.all(msgs.map((m) => getMeta(db.settings, m.id, ['Message-ID', 'Subject'])));
+      metas.sort((x, y) => y.internalDate - x.internalDate);
+      const m = metas[0];
+      // Any message in that thread from someone else means they replied; don't follow up.
+      const inbound = await listMessages(db.settings, `from:${l.email.toLowerCase()}`, 5);
+      if (inbound.length) { found.push({ id, ok: false, reason: 'they have emailed you' }); continue; }
+      found.push({ id, ok: true, threadId: m.threadId, messageIdHeader: m.headers['message-id'] || null, subject: m.headers.subject || '' });
+    }
+    const { result } = await mutateDb((d) => {
+      let linked = 0;
+      for (const f of found) {
+        if (!f.ok) continue;
+        const l = d.leads.find((x) => x.id === f.id);
+        const s = (l.history || []).filter((h) => h.type === 'email_sent');
+        if (s.length !== 1) continue;
+        Object.assign(s[0], { threadId: f.threadId, messageIdHeader: f.messageIdHeader, subject: s[0].subject || f.subject });
+        l.threadIds = Array.from(new Set([...(l.threadIds || []), f.threadId]));
+        l.nextFollowUpAt = Date.now();
+        linked++;
+      }
+      return linked;
+    });
+    return json({ ok: true, linked: result, results: found.map(({ id, ok, reason, subject }) => ({ id, ok, reason, subject })) });
+  }
+
   // Records a verification done outside the app (e.g. Apollo's mailbox check) with its evidence,
   // and optionally fills in the contact found by research. Never marks valid without a provider and reason.
   if (a === 'recordVerification') {

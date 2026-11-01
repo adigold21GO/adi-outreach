@@ -229,6 +229,18 @@ test('end to end', async () => {
   await Promise.all(Array.from({ length: 6 }, (_, i) => call(data.POST, '/api/data', 'POST', { action: 'addNote', id: di.id, text: `n${i}` })));
   d = (await call(data.GET, '/api/data')).j;
   assert.equal(d.leads.find((l) => l.id === di.id).history.filter((h) => h.type === 'note').length, 6);
+  // verified mode: pre-checked rows still go through duplicate, exclusion and MX checks
+  r = await call(imp.POST, '/api/import', 'POST', { mode: 'verified', candidates: [{ company: 'NoProof', email: 'a@noproof.com' }] });
+  assert.equal(r.status, 400);
+  r = await call(imp.POST, '/api/import', 'POST', { mode: 'verified', candidates: [
+    { company: 'Pre Co', firstName: 'Pat', email: 'pat@preco.com', verifiedBy: 'apollo-leadmagic', verifiedReason: 'validated' },
+    { company: 'Dead Pre', email: 'x@dead.com', verifiedBy: 'apollo-leadmagic', verifiedReason: 'validated' },
+    { company: 'Good Co again', email: 'other@goodco.com', verifiedBy: 'apollo-leadmagic', verifiedReason: 'validated' },
+  ] });
+  assert.equal(r.status, 200, JSON.stringify(r.j));
+  assert.deepEqual(r.j.results.map((x) => x.added), [true, false, false]);
+  d = (await call(data.GET, '/api/data')).j;
+  assert.equal(d.leads.find((l) => l.email === 'pat@preco.com').verification.provider, 'apollo-leadmagic');
   // seed mode reads the bundled research leads in slices
   r = await call(imp.POST, '/api/import', 'POST', { mode: 'seed', offset: 0 });
   assert.equal(r.status, 200, JSON.stringify(r.j));

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { json, guarded, body, HttpError } from '../lib/http.js';
 import { loadDb, mutateDb } from '../lib/db.js';
 import { randomId } from '../lib/crypto.js';
-import { verifyEmail, normalizeEmail, syntaxOk } from '../lib/verify.js';
+import { verifyEmail, normalizeEmail, syntaxOk, hasMx, isDisposable } from '../lib/verify.js';
 import { domainOf, suppressed, FREE_MAIL, addEvent, STATUSES, phoneKey, nameKey } from '../lib/model.js';
 
 const MAX_PER_CALL = 25;
@@ -105,7 +105,18 @@ export const POST = guarded(async (request) => {
   const candidates = raw.map(clean);
   if (candidates.length > MAX_PER_CALL) throw new HttpError(`Send at most ${MAX_PER_CALL} rows per request`);
   const { db } = await loadDb();
-  if (!db.settings.verifier.apiKeyEnc) throw new HttpError('Add your verification service API key in Settings before importing. Nothing gets added unverified.', 409);
+  // 'verified' mode: rows already mailbox-checked outside the app (e.g. Apollo). Each row must carry
+  // the provider and reason; the app still runs format, duplicate, exclusion and mail-server checks.
+  const preVerified = b.mode === 'verified';
+  if (preVerified) {
+    raw.forEach((x, i) => {
+      if (!x.verifiedBy || !x.verifiedReason) throw new HttpError(`Row ${i + 1}: verifiedBy and verifiedReason are required in verified mode`);
+      candidates[i].verifiedBy = String(x.verifiedBy).slice(0, 60);
+      candidates[i].verifiedReason = String(x.verifiedReason).slice(0, 300);
+    });
+  } else if (!db.settings.verifier.apiKeyEnc) {
+    throw new HttpError('Add your verification service API key in Settings before importing. Nothing gets added unverified.', 409);
+  }
 
   const batchDomains = new Set(); const batchEmails = new Set();
   const plan = candidates.map((c) => {
@@ -116,6 +127,14 @@ export const POST = guarded(async (request) => {
 
   const results = await pool(plan, 5, async ({ c, why }) => {
     if (why) return { email: c.email, company: c.company, added: false, status: 'skipped', reason: why };
+    if (c.verifiedBy) {
+      const dm = domainOf(c.email);
+      if (isDisposable(c.email)) return { email: c.email, company: c.company, added: false, status: 'rejected', reason: 'Disposable address' };
+      if (!(await hasMx(dm))) return { email: c.email, company: c.company, added: false, status: 'rejected', reason: `${dm} has no mail server` };
+      const v = { ok: true, reason: c.verifiedReason, checkedAt: Date.now(), provider: c.verifiedBy };
+      delete c.verifiedBy; delete c.verifiedReason;
+      return { email: c.email, company: c.company, added: true, status: 'added', reason: v.reason, v, c };
+    }
     const v = await verifyEmail(db.settings, c.email);
     return { email: c.email, company: c.company, added: v.ok, status: v.ok ? 'added' : v.status, reason: v.reason, v, c };
   });
