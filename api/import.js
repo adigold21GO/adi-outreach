@@ -96,8 +96,9 @@ export const POST = guarded(async (request) => {
   // Seed mode: rows bundled with the deployment (seed/candidates.json), processed in slices.
   let raw = b.candidates || [];
   let seedTotal = null;
-  if (b.mode === 'seed') {
-    const all = JSON.parse(await readFile(new URL('../seed/candidates.json', import.meta.url), 'utf8'));
+  if (b.mode === 'seed' || (b.mode === 'verified' && b.fromSeed)) {
+    const file = b.mode === 'seed' ? '../seed/candidates.json' : '../seed/verified.json';
+    const all = JSON.parse(await readFile(new URL(file, import.meta.url), 'utf8'));
     seedTotal = all.length;
     const offset = Math.max(0, Number(b.offset) || 0);
     raw = all.slice(offset, offset + MAX_PER_CALL);
