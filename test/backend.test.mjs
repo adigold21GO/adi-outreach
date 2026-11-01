@@ -96,6 +96,7 @@ test('end to end', async () => {
 
   // settings + exclusion list
   r = await call(data.POST, '/api/data', 'POST', { action: 'saveSettings', settings: { verifierKey: 'mvkey', googleClientId: 'cid.apps', googleClientSecret: 'sec', mailingAddress: 'PO Box 1, Austin TX', dailyCap: 3 } });
+  await call(data.POST, '/api/data', 'POST', { action: 'saveTemplate', template: { id: 'first-touch', name: 'First email', kind: 'first', subject: 'Quick question about {company}', body: 'Hi {first_name},\n\nShort intro.' } });
   assert.equal(r.status, 200); assert.equal(r.j.data.settings.verifier.hasKey, true);
   assert.ok(!JSON.stringify(r.j.data).includes('mvkey'), 'secret must not leak');
   await call(data.POST, '/api/data', 'POST', { action: 'addSuppression', emails: ['old@volv.com'], domains: ['contacted.com'] });
@@ -134,6 +135,10 @@ test('end to end', async () => {
   const ann = d.leads.find((l) => l.email === 'ann@goodco.com');
   assert.equal(ann.verification.status, 'valid');
 
+  // blocked until sender identity is set
+  r = await call(send.POST, '/api/send', 'POST', { leadId: ann.id, templateId: 'first-touch' });
+  assert.equal(r.status, 409); assert.match(r.j.error, /From name and signature/);
+  await call(data.POST, '/api/data', 'POST', { action: 'saveSettings', settings: { fromName: 'Test Sender', signature: 'Test Sender' } });
   // send before gmail connected
   r = await call(send.POST, '/api/send', 'POST', { leadId: ann.id, templateId: 'first-touch' });
   assert.equal(r.status, 409); assert.match(r.j.error, /Gmail is not connected/);

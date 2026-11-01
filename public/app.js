@@ -98,7 +98,7 @@ async function boot() {
   syncQuietly();
 }
 function renderLogin() {
-  root.innerHTML = `<form class="login card" id="login"><h1>Adi Outreach</h1><p class="sub">Enter your passcode.</p>
+  root.innerHTML = `<form class="login card" id="login"><h1>Outreach</h1><p class="sub">Enter your passcode.</p>
     <input type="password" id="pass" autocomplete="current-password" autofocus><div class="row" style="margin-top:12px"><button class="btn primary">Sign in</button></div></form>`;
   $('#login').onsubmit = async (e) => {
     e.preventDefault();
@@ -131,7 +131,7 @@ function render() {
   const nav = [['today', 'Today', replies], ['dialer', 'Dialer'], ['leads', 'Leads'], ['pipeline', 'Pipeline'], ['clients', 'Clients'], ['templates', 'Templates'], ['import', 'Import'], ['settings', 'Settings']];
   const scroll = $('main')?.scrollTop;
   root.innerHTML = `<div class="app">
-    <nav class="side"><div class="brand">Adi Outreach<small>${esc(D.gmail.connected ? D.gmail.email : 'Gmail not connected')}</small></div>
+    <nav class="side"><div class="brand">${esc(D.settings.fromName ? D.settings.fromName.split(" ")[0] + " Outreach" : "Outreach")}<small>${esc(D.gmail.connected ? D.gmail.email : 'Gmail not connected')}</small></div>
       ${nav.map(([k, label, c]) => `<a href="#${k}" class="${name === k ? 'on' : ''}">${label}${c ? `<span class="count">${c}</span>` : ''}</a>`).join('')}
       <div class="foot">${D.sentToday}/${D.settings.dailyCap} emails today<br>Inbox checked ${ago(D.sync?.lastSyncAt)}</div>
     </nav>
