@@ -358,7 +358,7 @@ function timeline(l, max = 100) {
   return `<ul class="timeline">${items.map((h) => {
     let extra = '';
     if (h.type === 'email_sent') extra = h.subject ? `“${esc(h.subject)}”` : '';
-    if (['reply', 'auto_reply', 'bounce'].includes(h.type)) extra = esc(h.snippet || '');
+    if (['reply', 'auto_reply', 'bounce'].includes(h.type)) extra = esc(unent(h.snippet || ''));
     if (h.type === 'call' || h.type === 'note') extra = esc(h.note || h.text || '');
     if (h.type === 'verified' || h.type === 'send_failed') extra = esc(h.reason || '');
     return `<li><b>${evText(h)}</b>${h.source === 'volvera' ? ' <span class="pill">Volvera</span>' : ''}${h.source === 'autopilot' ? ' <span class="pill">Autopilot</span>' : ''} <span class="when">${when(h.t)}</span>${extra ? `<div class="muted">${extra}</div>` : ''}</li>`;
