@@ -175,7 +175,7 @@ test('end to end', async () => {
   const mime = Buffer.from(sentRaw[0].raw, 'base64url').toString();
   assert.match(mime, /To: ann@goodco.com/); assert.match(mime, /Subject: Quick question about Good Co/);
   const bodyText = Buffer.from(mime.split('\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString();
-  assert.match(bodyText, /^Hi Ann,/); assert.match(bodyText, /Short intro about after-hours calls\./); assert.match(bodyText, /PO Box 1/); assert.match(bodyText, /unsubscribe/);
+  assert.match(bodyText, /^Hi Ann,/); assert.match(bodyText, /Short intro about after-hours calls\./); assert.doesNotMatch(bodyText, /PO Box 1/); assert.doesNotMatch(bodyText, /unsubscribe/i);
   // duplicate first send blocked
   r = await call(send.POST, '/api/send', 'POST', { leadId: ann.id, templateId: 'first-touch' });
   assert.equal(r.status, 409); assert.match(r.j.error, /already sent/);

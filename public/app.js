@@ -51,8 +51,7 @@ function renderTpl(t, l) {
   const s = D.settings;
   const vars = { first_name: (l.firstName || '').trim() || 'there', last_name: l.lastName || '', company: l.company || 'your business', city: l.city || '', industry: l.industry || '', title: l.title || '', my_name: s.fromName || '', detail: (l.detail || '').trim(), task: (l.task || '').trim() };
   const fill = (x) => String(x || '').replace(/\{(\w+)\}/g, (m, k) => (k in vars && vars[k] !== '' ? vars[k] : m));
-  const legal = [s.mailingAddress?.trim() || '[your mailing address, set in Settings]', 'If you would rather not hear from me, reply "unsubscribe" and I won\'t email again.'].join('\n');
-  return { subject: fill(t.subject), body: `${fill(t.body).trim()}\n\n${(s.signature || '').trim()}\n\n${legal}` };
+  return { subject: fill(t.subject), body: `${fill(t.body).trim()}\n\n${(s.signature || '').trim()}` };
 }
 
 function toast(msg, bad = false) {
@@ -147,7 +146,6 @@ function setupChecklist() {
   const items = [
     [D.gmail.connected, 'Connect Gmail (adigold21@gmail.com)', '#settings'],
     [D.settings.verifier.hasKey, 'Add your email verification API key', '#settings'],
-    [!!D.settings.mailingAddress?.trim(), 'Add a mailing address for the email footer', '#settings'],
     [D.leads.length > 0, 'Import leads', '#import'],
   ];
   if (items.every((i) => i[0])) return '';
@@ -462,7 +460,7 @@ function vTemplates() {
   UI.tplId = t?.id;
   const sample = D.leads.find((l) => l.firstName && l.company) || { firstName: 'Maria', company: 'Lone Star Dental', city: 'Dallas', industry: 'Dental' };
   const m = t ? renderTpl(t, sample) : { subject: '', body: '' };
-  return `<h1>Templates</h1><p class="sub">Merge fields: <code>{first_name}</code> <code>{company}</code> <code>{city}</code> <code>{industry}</code> <code>{title}</code> <code>{detail}</code> <code>{task}</code> (the last two are filled per lead). Any field left unfilled blocks the send. Your signature and the unsubscribe line are added automatically.</p>
+  return `<h1>Templates</h1><p class="sub">Merge fields: <code>{first_name}</code> <code>{company}</code> <code>{city}</code> <code>{industry}</code> <code>{title}</code> <code>{detail}</code> <code>{task}</code> (the last two are filled per lead). Any field left unfilled blocks the send. Your signature is added automatically.</p>
   <div class="grid g2"><div class="card">
     <div class="row">${D.templates.map((x) => `<button class="btn small ${x.id === t?.id ? 'primary' : ''}" data-act="pickTpl" data-id="${x.id}">${esc(x.name)}</button>`).join('')}<button class="btn small" data-act="newTpl">+ New</button></div>
     ${t ? `<label>Name</label><input id="tName" value="${esc(t.name)}">
@@ -591,7 +589,6 @@ function vSettings() {
   <div class="card"><h2>Sending</h2>
     <label>From name</label><input id="fromName" value="${esc(s.fromName)}">
     <label>Signature</label><textarea id="sig">${esc(s.signature)}</textarea>
-    <label>Mailing address (required in every cold email by CAN-SPAM; a P.O. box works)</label><input id="addr" value="${esc(s.mailingAddress)}" placeholder="PO Box 123, Austin, TX 78701">
     <div class="fields"><div><label>Max emails per day</label><input id="cap" type="number" min="1" max="150" value="${s.dailyCap}"></div>
     <div><label>Follow up after (business days)</label><input id="fuDays" type="number" min="1" max="30" value="${s.followUpDays}"></div>
     <div><label>Follow-ups per lead</label><input id="fuMax" type="number" min="0" max="3" value="${s.maxFollowUps}"></div></div>
@@ -608,7 +605,7 @@ function vSettings() {
 function settingsPayload() {
   const v = (id) => $(id)?.value;
   const out = {
-    fromName: v('#fromName'), signature: v('#sig'), mailingAddress: v('#addr'), dailyCap: v('#cap'), followUpDays: v('#fuDays'), maxFollowUps: v('#fuMax'),
+    fromName: v('#fromName'), signature: v('#sig'), dailyCap: v('#cap'), followUpDays: v('#fuDays'), maxFollowUps: v('#fuMax'),
     reverifyDays: v('#reverify'), allowRoleEmails: $('#allowRole').checked, verifierProvider: v('#vProv'), googleClientId: v('#gId'),
     autopilot: { enabled: $('#apOn').checked, firstTouchPerDay: v('#apN'), includeFollowUps: $('#apFu').checked },
   };
