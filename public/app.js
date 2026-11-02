@@ -3,6 +3,7 @@ const root = document.getElementById('root');
 const TZ = 'America/Chicago';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const $ = (s, el = document) => el.querySelector(s);
+const unent = (s) => { const t = document.createElement('textarea'); t.innerHTML = String(s ?? ''); return t.value; };
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
 let D = null;
@@ -180,7 +181,7 @@ function vToday() {
     <div>
       <div class="card"><h2>Replies to answer</h2>${needs.length ? `<ul class="list">${needs.slice(0, 12).map((l) => {
         const r = [...l.history].reverse().find((h) => h.type === 'reply');
-        return `<li><div class="main"><a href="#" data-lead="${l.id}"><b>${esc(l.company)}</b></a> <span class="muted">${esc(person(l))}</span><div class="muted small clip">${esc(r?.snippet || '')}</div></div><span class="muted small">${ago(r?.at || r?.t)}</span></li>`;
+        return `<li><div class="main"><a href="#" data-lead="${l.id}"><b>${esc(l.company)}</b></a> <span class="muted">${esc(person(l))}</span><div class="muted small clip">${esc(unent(r?.snippet || ''))}</div></div><span class="muted small">${ago(r?.at || r?.t)}</span></li>`;
       }).join('')}</ul>` : '<div class="empty">No unanswered replies. Replies are pulled from Gmail automatically.</div>'}</div>
       <div class="card"><div class="row"><h2 style="margin:0">Send emails</h2><span class="spacer"></span><span class="muted small">${left} left today</span></div>
         ${b ? batchView() : `
@@ -498,7 +499,7 @@ function vResults() {
   <div class="grid g2">
     <div class="card"><h2>Replies</h2>
       ${repliedLeads.length ? `<div class="muted small" style="margin-bottom:6px">${open} open, ${interested} meeting or client, ${notNow} not interested. ${afterFollow.first} replied to the first email, ${afterFollow.follow} to a follow-up.</div>
-      <ul class="list">${repliedLeads.slice(0, 40).map(({ l, r }) => `<li><div class="main"><a href="#" data-lead="${l.id}"><b>${esc(l.company)}</b></a> ${pill(l.status)}<div class="muted small clip">${esc(r.snippet || '')}</div></div><span class="muted small">${ago(tOf(r))}</span></li>`).join('')}</ul>`
+      <ul class="list">${repliedLeads.slice(0, 40).map(({ l, r }) => `<li><div class="main"><a href="#" data-lead="${l.id}"><b>${esc(l.company)}</b></a> ${pill(l.status)}<div class="muted small clip">${esc(unent(r.snippet || ''))}</div></div><span class="muted small">${ago(tOf(r))}</span></li>`).join('')}</ul>`
       : '<div class="empty">No replies in this period yet.</div>'}</div>
     <div class="card"><h2>By day</h2>
       ${dayList.length ? `<table><thead><tr><th>Day</th><th>First</th><th>Follow-up</th><th>Replies</th><th>Bounces</th></tr></thead><tbody>
