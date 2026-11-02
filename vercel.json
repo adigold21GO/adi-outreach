@@ -15,7 +15,8 @@
       "maxDuration": 300
     },
     "api/sync.js": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "includeFiles": "seed/**"
     },
     "api/import.js": {
       "maxDuration": 300,

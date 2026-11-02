@@ -3,8 +3,32 @@ import { runSync } from '../lib/sync.js';
 import { loadDb, mutateDb } from '../lib/db.js';
 import { sendToLead, readyForFirst, dueFollowUps } from '../lib/outreach.js';
 import { weekdayInTZ, sentToday } from '../lib/model.js';
+import { readFile } from 'node:fs/promises';
+import { importCandidates, MAX_PER_CALL } from '../lib/importer.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// New research leads shipped in seed/pending.json are verified (MillionVerifier) and added on the
+// next cron run, once each. Rows that fail verification are logged in the import log and not retried.
+async function importPending() {
+  let all;
+  try { all = JSON.parse(await readFile(new URL('../seed/pending.json', import.meta.url), 'utf8')); } catch { return null; }
+  const { db } = await loadDb();
+  if (!db.settings.verifier?.apiKeyEnc) return { skipped: 'no verifier key' };
+  const done = new Set(db.pendingDone || []);
+  const todo = all.filter((r) => r.email && !done.has(String(r.email).trim().toLowerCase()));
+  let added = 0; let checked = 0;
+  for (let i = 0; i < todo.length && i < MAX_PER_CALL * 4; i += MAX_PER_CALL) {
+    const batch = todo.slice(i, i + MAX_PER_CALL);
+    let results;
+    try { results = await importCandidates(batch); } catch (e) { return { added, checked, error: e.message }; }
+    checked += results.length; added += results.filter((r) => r.added).length;
+    // Only mark rows done when the verifier gave an answer, so a provider outage is retried next run.
+    const finished = results.filter((r) => r.status !== 'error').map((r) => r.email);
+    await mutateDb((d) => { d.pendingDone = Array.from(new Set([...(d.pendingDone || []), ...finished])); });
+  }
+  return { added, checked };
+}
 
 async function autopilot(started) {
   const { db } = await loadDb();
@@ -47,8 +71,9 @@ async function handle(request) {
   const started = Date.now();
   try {
     const sync = await runSync();
+    const pending = cron ? await importPending() : null;
     const ap = cron ? await autopilot(started) : null;
-    return json({ ok: true, sync, autopilot: ap });
+    return json({ ok: true, sync, pending, autopilot: ap });
   } catch (e) {
     console.error(e);
     return error(e.publicMessage || e.message, e.status || 500);
