@@ -9,7 +9,7 @@ let D = null;
 const UI = {
   q: '', status: 'all', verif: 'all', limit: 200,
   dialFilter: 'new', dialIndex: 0, dialNote: '',
-  lead: null, batch: null, tplId: null,
+  lead: null, batch: null, tplId: null, range: 7,
   csvRows: null, csvMap: null, importing: false, importResults: [], importStop: false,
   flash: null,
 };
@@ -126,8 +126,8 @@ function render() {
   if (!D) return;
   const { name } = route();
   const replies = D.leads.filter((l) => l.needsResponse).length;
-  const views = { today: vToday, dialer: vDialer, leads: vLeads, pipeline: vPipeline, clients: vClients, templates: vTemplates, import: vImport, settings: vSettings };
-  const nav = [['today', 'Today', replies], ['dialer', 'Dialer'], ['leads', 'Leads'], ['pipeline', 'Pipeline'], ['clients', 'Clients'], ['templates', 'Templates'], ['import', 'Import'], ['settings', 'Settings']];
+  const views = { today: vToday, dialer: vDialer, leads: vLeads, pipeline: vPipeline, results: vResults, clients: vClients, templates: vTemplates, import: vImport, settings: vSettings };
+  const nav = [['today', 'Today', replies], ['dialer', 'Dialer'], ['leads', 'Leads'], ['pipeline', 'Pipeline'], ['results', 'Results'], ['clients', 'Clients'], ['templates', 'Templates'], ['import', 'Import'], ['settings', 'Settings']];
   const scroll = $('main')?.scrollTop;
   root.innerHTML = `<div class="app">
     <nav class="side"><div class="brand">${esc(D.settings.fromName ? D.settings.fromName.split(" ")[0] + " Outreach" : "Outreach")}<small>${esc(D.gmail.connected ? D.gmail.email : 'Gmail not connected')}</small></div>
@@ -443,6 +443,78 @@ function vPipeline() {
     ${by[s].length > 60 ? `<div class="muted small">+${by[s].length - 60} more in Leads</div>` : ''}</div>`).join('')}</div>`;
 }
 
+// ---------- Results ----------
+function vResults() {
+  const days = UI.range; // 7, 30, or 0 = all time
+  const since = days ? new Date(`${dayKey(Date.now() - (days - 1) * 864e5)}T00:00:00-06:00`).getTime() : 0;
+  const inR = (t) => t >= since;
+  const tOf = (h) => h.at || h.t;
+  const rows = {}; const rowFor = (t) => (rows[dayKey(t)] ||= { first: 0, follow: 0, reply: 0, bounce: 0 });
+  let first = 0; let follow = 0; let bounces = 0; let optOuts = 0;
+  const emailed = new Set(); const repliedLeads = []; const ind = {};
+  const afterFollow = { first: 0, follow: 0 };
+  for (const l of D.leads) {
+    const hs = l.history || [];
+    const mine = hs.filter((h) => h.type === 'email_sent' && inR(h.t));
+    for (const h of mine) { if (h.kind === 'followup') { follow++; rowFor(h.t).follow++; } else { first++; rowFor(h.t).first++; } }
+    if (mine.length) emailed.add(l.id);
+    for (const h of hs) if (h.type === 'bounce' && inR(tOf(h))) { bounces++; rowFor(tOf(h)).bounce++; }
+    const reps = hs.filter((h) => h.type === 'reply' && inR(tOf(h)));
+    for (const h of reps) rowFor(tOf(h)).reply++;
+    const real = reps.filter((h) => !h.optOut);
+    if (reps.some((h) => h.optOut)) optOuts++;
+    if (real.length) {
+      const r = real.at(-1);
+      const before = hs.filter((h) => h.type === 'email_sent' && h.t <= tOf(real[0]));
+      if (before.length) afterFollow[before.at(-1).kind === 'followup' ? 'follow' : 'first']++;
+      repliedLeads.push({ l, r });
+    }
+    if (mine.length) {
+      const k = (l.industry || 'Other').trim() || 'Other';
+      const x = (ind[k] ||= { n: 0, r: 0 }); x.n++; if (real.length) x.r++;
+    }
+  }
+  repliedLeads.sort((a, b) => tOf(b.r) - tOf(a.r));
+  const reached = emailed.size;
+  const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '—');
+  const interested = repliedLeads.filter(({ l }) => ['meeting', 'client'].includes(l.status)).length;
+  const notNow = repliedLeads.filter(({ l }) => ['lost', 'do_not_contact'].includes(l.status)).length;
+  const open = repliedLeads.length - interested - notNow;
+  const dayList = Object.keys(rows).sort().reverse();
+  const fmtDay = (k) => new Date(`${k}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const industries = Object.entries(ind).sort((a, b) => b[1].n - a[1].n).slice(0, 12);
+  const runs = (D.autopilotLog || []).filter((r) => inR(r.t)).slice(-12).reverse();
+  const chip = (n, label) => `<button class="btn${UI.range === n ? ' primary' : ''}" data-act="range" data-n="${n}">${label}</button>`;
+  return `<h1>Results</h1><p class="sub">How your outreach is doing. Updates every time the inbox is checked.</p>
+  <div class="row" style="margin-bottom:14px">${chip(7, 'Last 7 days')}${chip(30, 'Last 30 days')}${chip(0, 'All time')}</div>
+  <div class="kpis">
+    <div class="kpi"><div class="n">${first + follow}</div><div class="l">Emails sent (${first} first, ${follow} follow-up)</div></div>
+    <div class="kpi"><div class="n">${reached}</div><div class="l">Businesses reached</div></div>
+    <div class="kpi"><div class="n">${repliedLeads.length}</div><div class="l">Replied (${pct(repliedLeads.length, reached)})</div></div>
+    <div class="kpi"><div class="n">${interested}</div><div class="l">Meetings or clients</div></div>
+    <div class="kpi"><div class="n">${bounces}</div><div class="l">Bounced (${pct(bounces, first + follow)})</div></div>
+    <div class="kpi"><div class="n">${optOuts}</div><div class="l">Asked to stop</div></div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>Replies</h2>
+      ${repliedLeads.length ? `<div class="muted small" style="margin-bottom:6px">${open} open, ${interested} meeting or client, ${notNow} not interested. ${afterFollow.first} replied to the first email, ${afterFollow.follow} to a follow-up.</div>
+      <ul class="list">${repliedLeads.slice(0, 40).map(({ l, r }) => `<li><div class="main"><a href="#" data-lead="${l.id}"><b>${esc(l.company)}</b></a> ${pill(l.status)}<div class="muted small clip">${esc(r.snippet || '')}</div></div><span class="muted small">${ago(tOf(r))}</span></li>`).join('')}</ul>`
+      : '<div class="empty">No replies in this period yet.</div>'}</div>
+    <div class="card"><h2>By day</h2>
+      ${dayList.length ? `<table><thead><tr><th>Day</th><th>First</th><th>Follow-up</th><th>Replies</th><th>Bounces</th></tr></thead><tbody>
+      ${dayList.map((k) => `<tr><td>${fmtDay(k)}</td><td>${rows[k].first}</td><td>${rows[k].follow}</td><td>${rows[k].reply}</td><td>${rows[k].bounce}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">Nothing sent in this period.</div>'}</div>
+    <div class="card"><h2>By industry</h2>
+      ${industries.length ? `<table><thead><tr><th>Industry</th><th>Emailed</th><th>Replied</th><th>Rate</th></tr></thead><tbody>
+      ${industries.map(([k, x]) => `<tr><td>${esc(k)}</td><td>${x.n}</td><td>${x.r}</td><td>${pct(x.r, x.n)}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">Nothing sent in this period.</div>'}</div>
+    <div class="card"><h2>Autopilot runs</h2>
+      ${runs.length ? `<table><thead><tr><th>When</th><th>Sent</th><th>Skipped</th><th>Note</th></tr></thead><tbody>
+      ${runs.map((r) => `<tr><td>${when(r.t)}</td><td>${r.sent}</td><td>${r.failed}</td><td class="small muted">${esc((r.errors || [])[0] || '')}</td></tr>`).join('')}</tbody></table>`
+      : `<div class="empty">No Autopilot runs in this period.${D.settings.autopilot?.enabled ? '' : ' Autopilot is off.'}</div>`}</div>
+  </div>`;
+}
+
 // ---------- Clients ----------
 function vClients() {
   const clients = D.leads.filter((l) => l.status === 'client');
@@ -667,6 +739,7 @@ root.addEventListener('click', async (e) => {
     case 'batchStop': if (UI.batch) UI.batch.stop = true; break;
     case 'batchClose': UI.batch = null; render(); break;
     case 'more': UI.limit += 300; render(); break;
+    case 'range': UI.range = Number(actEl.dataset.n); render(); break;
     case 'export': exportCsv(); break;
     case 'dialOutcome': busy(() => dialOutcome(actEl.dataset.outcome)); break;
     case 'dialPrev': UI.dialIndex = Math.max(0, UI.dialIndex - 1); UI.dialNote = ''; render(); break;

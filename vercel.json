@@ -26,6 +26,14 @@
     {
       "path": "/api/sync?cron=1",
       "schedule": "30 14 * * *"
+    },
+    {
+      "path": "/api/sync?cron=2",
+      "schedule": "30 16 * * *"
+    },
+    {
+      "path": "/api/sync?cron=3",
+      "schedule": "30 18 * * *"
     }
   ],
   "headers": [
