@@ -14,9 +14,15 @@ async function autopilot(started) {
   if (wd === 'Sat' || wd === 'Sun') return { skipped: 'weekend' };
   const first = db.templates.find((t) => t.kind === 'first');
   const follow = db.templates.find((t) => t.kind === 'followup');
+  // Alternate follow-ups and first emails so both make progress each day,
+  // even when the daily cap or time limit stops the run early.
+  const fups = ap.includeFollowUps && follow ? dueFollowUps(db).map((l) => [l.id, follow.id]) : [];
+  const firsts = first ? readyForFirst(db).slice(0, ap.firstTouchPerDay).map((l) => [l.id, first.id]) : [];
   const queue = [];
-  if (ap.includeFollowUps && follow) for (const l of dueFollowUps(db)) queue.push([l.id, follow.id]);
-  if (first) for (const l of readyForFirst(db).slice(0, ap.firstTouchPerDay)) queue.push([l.id, first.id]);
+  for (let i = 0; i < Math.max(fups.length, firsts.length); i++) {
+    if (fups[i]) queue.push(fups[i]);
+    if (firsts[i]) queue.push(firsts[i]);
+  }
   let room = db.settings.dailyCap - sentToday(db);
   const log = { t: Date.now(), sent: 0, failed: 0, errors: [] };
   for (const [leadId, templateId] of queue) {
