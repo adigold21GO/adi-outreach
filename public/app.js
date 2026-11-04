@@ -8,13 +8,17 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
 let D = null;
 const UI = {
-  q: '', status: 'all', verif: 'all', limit: 200,
+  q: '', status: 'all', verif: 'all', section: 'all', limit: 200, verifying: null,
   dialFilter: 'new', dialIndex: 0, dialNote: '',
   lead: null, batch: null, tplId: null, range: 7,
   csvRows: null, csvMap: null, importing: false, importResults: [], importStop: false,
   flash: null,
 };
 
+const SECTIONS = { main: 'Main', 'sammy-ut': 'Sammy alumni: UT Austin', 'sammy-other': 'Sammy alumni: other chapters' };
+const MANUAL = new Set(['sammy-ut', 'sammy-other']);
+const secOf = (l) => (l.section in SECTIONS ? l.section : 'main');
+const manualOnly = (l) => MANUAL.has(secOf(l));
 const STATUS_LABEL = { new: 'New', contacted: 'Contacted', replied: 'Replied', meeting: 'Meeting', client: 'Client', lost: 'Lost', bounced: 'Bounced', do_not_contact: 'Do not contact' };
 const BOARD = ['new', 'contacted', 'replied', 'meeting', 'client', 'lost'];
 const OUTCOMES = [
@@ -83,8 +87,8 @@ async function act(action, payload = {}, quiet = false) {
 async function refresh() { D = await api('/api/data'); render(); }
 
 // Derived lists
-const isDueFollow = (l) => l.status === 'contacted' && l.nextFollowUpAt && l.nextFollowUpAt <= Date.now() && !replied(l) && sent(l).filter((h) => h.kind === 'followup').length < (D.settings.maxFollowUps ?? 1) && !l.sendUnknown;
-const isReady = (l) => l.status === 'new' && l.verification?.status === 'valid' && !sent(l).length && !l.sendUnknown;
+const isDueFollow = (l) => !manualOnly(l) && l.status === 'contacted' && l.nextFollowUpAt && l.nextFollowUpAt <= Date.now() && !replied(l) && sent(l).filter((h) => h.kind === 'followup').length < (D.settings.maxFollowUps ?? 1) && !l.sendUnknown;
+const isReady = (l) => !manualOnly(l) && l.status === 'new' && l.verification?.status === 'valid' && !sent(l).length && !l.sendUnknown;
 
 // ---------- login ----------
 async function boot() {
@@ -323,6 +327,7 @@ function filteredLeads() {
   return D.leads.filter((l) => {
     if (UI.status !== 'all' && l.status !== UI.status) return false;
     if (UI.verif !== 'all' && (l.verification?.status || 'unverified') !== UI.verif) return false;
+    if (UI.section !== 'all' && secOf(l) !== UI.section) return false;
     if (!q) return true;
     return [l.company, l.firstName, l.lastName, l.email, l.phone, l.city, l.industry, l.title].some((v) => (v || '').toLowerCase().includes(q));
   }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
@@ -330,24 +335,49 @@ function filteredLeads() {
 function vLeads() {
   const list = filteredLeads();
   const counts = {}; for (const l of D.leads) counts[l.status] = (counts[l.status] || 0) + 1;
+  const secCount = {}; for (const l of D.leads) secCount[secOf(l)] = (secCount[secOf(l)] || 0) + 1;
+  const toVerify = list.filter(needsVerify);
+  const vb = UI.verifying;
   return `<div class="row"><h1>Leads</h1><span class="muted">${D.leads.length} total</span><span class="spacer"></span>
     <button class="btn" data-act="export">Export CSV</button><a class="btn primary" href="#import">Add leads</a></div>
+  <div class="row tabs" style="margin-top:12px">${[['all', 'All sections', D.leads.length], ...Object.entries(SECTIONS).map(([k, v]) => [k, v, secCount[k] || 0])].map(([k, v, n]) => `<button class="btn small${UI.section === k ? ' primary' : ''}" data-act="section" data-s="${k}">${esc(v)} (${n})</button>`).join('')}</div>
+  ${MANUAL.has(UI.section) ? '<div class="notice warn" style="margin-top:10px">Manual-only section. Autopilot and batch sends skip these leads. Open a lead to review its personal email and send it yourself.</div>' : ''}
+  <div class="row" style="margin-top:10px">${vb ? `<b>Verifying</b><span class="muted">${vb.done} of ${vb.total} checked · ${vb.valid} verified · ${vb.rejected} failed${vb.errors ? ` · ${vb.errors} errors` : ''}</span>${vb.running ? '<button class="btn small" data-act="verifyStop">Stop</button>' : '<button class="btn small" data-act="verifyClose">Close</button>'}${vb.msg ? `<span class="muted small">${esc(vb.msg)}</span>` : ''}`
+    : `<button class="btn" data-act="verifyAll" ${toVerify.length && D.settings.verifier.hasKey ? '' : 'disabled'}>Verify ${toVerify.length} unverified with ${D.settings.verifier.provider === 'zerobounce' ? 'ZeroBounce' : 'MillionVerifier'}</button><span class="muted small">Uses one credit per lead. Applies to the leads shown.</span>`}</div>
   <div class="row" style="margin:14px 0">
     <input id="q" placeholder="Search company, name, email, city…" value="${esc(UI.q)}" style="max-width:340px">
     <select id="fStatus" style="width:auto"><option value="all">All statuses</option>${Object.keys(STATUS_LABEL).map((s) => `<option value="${s}" ${UI.status === s ? 'selected' : ''}>${STATUS_LABEL[s]} (${counts[s] || 0})</option>`).join('')}</select>
     <select id="fVerif" style="width:auto">${[['all', 'Any verification'], ['valid', 'Verified'], ['unverified', 'Not verified'], ['rejected', 'Failed check']].map(([k, v]) => `<option value="${k}" ${UI.verif === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
     <span class="muted">${list.length} shown</span></div>
   <div class="tablewrap"><table><thead><tr><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Status</th><th>Last touch</th></tr></thead><tbody>
-  ${list.slice(0, UI.limit).map((l) => `<tr data-lead="${l.id}"><td><b>${esc(l.company)}</b><div class="muted small">${esc([l.industry, l.city].filter(Boolean).join(' · '))}</div></td>
+  ${list.slice(0, UI.limit).map((l) => `<tr data-lead="${l.id}"><td><b>${esc(l.company)}</b>${manualOnly(l) ? ` <span class="pill">${secOf(l) === 'sammy-ut' ? 'Sammy UT' : 'Sammy'}</span>` : ''}<div class="muted small">${esc([l.industry, l.city].filter(Boolean).join(' · '))}</div></td>
     <td>${esc(person(l))}<div class="muted small">${esc(l.title || '')}</div></td>
     <td class="small">${esc(l.email)}<div>${vpill(l)}</div></td><td class="small">${esc(l.phone || '')}</td>
     <td>${pill(l.status)}${l.needsResponse ? ' <span class="pill replied">Needs reply</span>' : ''}</td><td class="small muted">${ago(lastTouch(l))}</td></tr>`).join('')}
   </tbody></table>${list.length > UI.limit ? `<div style="padding:12px"><button class="btn" data-act="more">Show more</button></div>` : ''}${!list.length ? '<div class="empty" style="padding:16px">No leads match.</div>' : ''}</div>`;
 }
+const needsVerify = (l) => l.email && !['valid', 'rejected'].includes(l.verification?.status || 'unverified') && !['bounced', 'do_not_contact'].includes(l.status);
+async function runVerifyAll() {
+  const ids = filteredLeads().filter(needsVerify).map((l) => l.id);
+  if (!ids.length) return;
+  if (!confirm(`Verify ${ids.length} email${ids.length > 1 ? 's' : ''} with ${D.settings.verifier.provider === 'zerobounce' ? 'ZeroBounce' : 'MillionVerifier'}? This uses about ${ids.length} credit${ids.length > 1 ? 's' : ''}.`)) return;
+  UI.verifying = { total: ids.length, done: 0, valid: 0, rejected: 0, errors: 0, running: true, stop: false, msg: '' };
+  render();
+  for (let i = 0; i < ids.length; i += 10) {
+    const vb = UI.verifying; if (!vb || vb.stop) break;
+    try {
+      const r = await api('/api/data', { method: 'POST', body: { action: 'verifyBatch', ids: ids.slice(i, i + 10) } });
+      for (const x of r.results) { vb.done++; if (x.status === 'error') vb.errors++; else if (x.ok) vb.valid++; else vb.rejected++; }
+    } catch (e) { vb.msg = e.message; break; }
+    if (route().name === 'leads') render();
+  }
+  if (UI.verifying) { UI.verifying.running = false; if (!UI.verifying.msg) UI.verifying.msg = UI.verifying.stop ? 'Stopped.' : 'Done.'; }
+  await refresh();
+}
 function exportCsv() {
-  const cols = ['company', 'firstName', 'lastName', 'title', 'email', 'phone', 'website', 'industry', 'city', 'state', 'status', 'verification', 'emailsSent', 'replied', 'lastTouch', 'notes'];
+  const cols = ['company', 'firstName', 'lastName', 'title', 'email', 'phone', 'website', 'industry', 'city', 'state', 'section', 'status', 'verification', 'emailsSent', 'replied', 'lastTouch', 'notes'];
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const rows = D.leads.map((l) => [l.company, l.firstName, l.lastName, l.title, l.email, l.phone, l.website, l.industry, l.city, l.state, l.status, l.verification?.status, sent(l).length, replied(l) ? 'yes' : 'no', lastTouch(l) ? new Date(lastTouch(l)).toISOString() : '', l.notes].map(q).join(','));
+  const rows = D.leads.map((l) => [l.company, l.firstName, l.lastName, l.title, l.email, l.phone, l.website, l.industry, l.city, l.state, SECTIONS[secOf(l)], l.status, l.verification?.status, sent(l).length, replied(l) ? 'yes' : 'no', lastTouch(l) ? new Date(lastTouch(l)).toISOString() : '', l.notes].map(q).join(','));
   const blob = new Blob([[cols.join(','), ...rows].join('\n')], { type: 'text/csv' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `leads-${dayKey()}.csv`; a.click();
 }
@@ -375,7 +405,7 @@ function drawer() {
   const f = (k, label, type = 'text') => `<div><label>${label}</label><input data-f="${k}" type="${type}" value="${esc(l[k] || '')}"></div>`;
   return `<div class="drawer-bg" data-act="closeLead"></div><aside class="drawer">
     <div class="row"><h1 style="flex:1">${esc(l.company)}</h1><button class="btn small" data-act="closeLead">Close</button></div>
-    <div class="row" style="margin-top:6px"><select id="dStatus" style="width:auto">${Object.keys(STATUS_LABEL).map((s) => `<option value="${s}" ${l.status === s ? 'selected' : ''}>${STATUS_LABEL[s]}</option>`).join('')}</select>
+    <div class="row" style="margin-top:6px"><select id="dSection" style="width:auto">${Object.entries(SECTIONS).map(([k, v]) => `<option value="${k}" ${secOf(l) === k ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select><select id="dStatus" style="width:auto">${Object.keys(STATUS_LABEL).map((s) => `<option value="${s}" ${l.status === s ? 'selected' : ''}>${STATUS_LABEL[s]}</option>`).join('')}</select>
       ${vpill(l)} <button class="btn small" data-act="verify">Verify email</button>
       ${l.needsResponse ? '<button class="btn small" data-act="responded">Mark reply answered</button>' : ''}</div>
     ${l.sendUnknown ? `<div class="notice warn" style="margin-top:12px">A send to this lead was interrupted. Check Gmail Sent for ${esc(l.email)}.<div class="row" style="margin-top:8px"><button class="btn small" data-act="sendUnknown" data-went="1">It went out</button><button class="btn small" data-act="sendUnknown" data-went="0">It did not go out</button></div></div>` : ''}
@@ -392,7 +422,13 @@ function drawer() {
     ${l.status === 'client' ? `<div class="section"><h2>Client</h2><div class="fields"><div><label>Monthly value ($)</label><input id="cMonthly" type="number" min="0" value="${esc(l.client?.monthly || 0)}"></div><div><label>Client since</label><input id="cSince" type="date" value="${l.client?.since ? dayKey(l.client.since) : ''}"></div></div>
       <label>Client notes</label><textarea id="cNotes">${esc(l.client?.notes || '')}</textarea><div style="margin-top:8px"><button class="btn" data-act="saveClient">Save</button></div></div>` : ''}
 
-    <div class="section"><h2>Email</h2>
+    ${manualOnly(l) ? `<div class="section"><h2>Personal email (manual only)</h2>
+      <p class="muted small">This lead is never emailed by Autopilot or a batch send. Edit the draft, then send it yourself. Your signature is added under it.</p>
+      <label>Subject</label><input id="drSubject" value="${esc(l.draft?.subject || '')}">
+      <label>Body</label><textarea id="drBody" style="min-height:220px">${esc(l.draft?.body || '')}</textarea>
+      <div class="row" style="margin-top:8px"><button class="btn" data-act="saveDraft">Save draft</button><button class="btn" data-act="copyDraft">Copy</button>
+        <button class="btn primary" data-act="sendDraft" ${l.draft?.body && !sent(l).some((h) => h.kind !== 'followup') ? '' : 'disabled'}>Send from ${esc(D.gmail.email || 'Gmail')}</button></div></div>` : ''}
+    <div class="section"><h2>${manualOnly(l) ? 'Template email' : 'Email'}</h2>
       <select id="dTpl">${tpls.map((t) => `<option value="${t.id}" ${t.id === tid ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
       <div class="preview" style="margin-top:8px"><b>${esc(msg.subject)}</b>\n\n${esc(msg.body)}</div>
       <div class="row" style="margin-top:8px"><button class="btn primary" data-act="sendOne" data-tpl="${tid}">Send from ${esc(D.gmail.email || 'Gmail')}</button><span class="muted small">${D.sentToday}/${D.settings.dailyCap} sent today</span></div></div>
@@ -558,6 +594,8 @@ const SYN = {
   city: ['city', 'town'], state: ['state', 'region', 'province'],
   linkedin: ['linkedin', 'linkedinurl', 'personlinkedinurl'],
   notes: ['notes', 'note', 'comments', 'description'],
+  detail: ['detail'], task: ['task'],
+  draftSubject: ['draftsubject', 'emailsubject', 'subject'], draftBody: ['draftbody', 'emailbody', 'body', 'email_body'],
 };
 function parseCsv(text) {
   const rows = []; let row = []; let f = ''; let q = false;
@@ -585,7 +623,7 @@ function csvCandidates() {
     const g = (k) => (m[k] != null ? (r[m[k]] || '').trim() : '');
     let first = g('firstName'); let last = g('lastName');
     if (!first && g('fullName')) { const p = g('fullName').split(/\s+/); first = p.shift(); last = p.join(' '); }
-    return { company: g('company'), firstName: first, lastName: last, title: g('title'), email: g('email'), phone: g('phone'), website: g('website'), industry: g('industry'), city: g('city'), state: g('state'), linkedin: g('linkedin'), notes: g('notes'), source: 'csv' };
+    return { company: g('company'), firstName: first, lastName: last, title: g('title'), email: g('email'), phone: g('phone'), website: g('website'), industry: g('industry'), city: g('city'), state: g('state'), linkedin: g('linkedin'), notes: g('notes'), detail: g('detail'), task: g('task'), draftSubject: g('draftSubject'), draftBody: g('draftBody'), section: UI.importSection || 'main', source: 'csv' };
   });
 }
 function vImport() {
@@ -599,6 +637,7 @@ function vImport() {
     <div class="row"><input type="file" id="csvFile" accept=".csv,.tsv,text/csv" style="width:auto"></div>
     <label>…or paste rows (first row = headers like Company, First name, Email, Phone, Website, City)</label>
     <textarea id="csvText" style="min-height:110px" placeholder="Company,First name,Last name,Email,Phone,Website,City"></textarea>
+    <label>Add these leads to</label><select id="impSection" style="width:auto">${Object.entries(SECTIONS).map(([k, v]) => `<option value="${k}" ${(UI.importSection || 'main') === k ? 'selected' : ''}>${esc(v)}${MANUAL.has(k) ? ' (manual only)' : ''}</option>`).join('')}</select>
     <div class="row" style="margin-top:8px"><button class="btn" data-act="parseCsv">Read rows</button></div>
     ${UI.csvRows ? `<div class="section"><b>${cands.length} rows.</b> <span class="muted">Columns found: ${Object.keys(UI.csvMap).map((k) => `<code>${k}</code>`).join(' ') || 'none'}</span>
       ${UI.csvMap.email == null || UI.csvMap.company == null ? '<div class="notice bad" style="margin-top:8px">Needs at least a Company and an Email column.</div>' : `
@@ -718,6 +757,8 @@ function after(name) {
     }
   }
   const ds = $('#dStatus'); if (ds) ds.onchange = () => act('setStatus', { id: UI.lead, status: ds.value });
+  const dsec = $('#dSection'); if (dsec) dsec.onchange = () => act('updateLead', { id: UI.lead, patch: { section: dsec.value } });
+  const isec = $('#impSection'); if (isec) isec.onchange = () => { UI.importSection = isec.value; };
   const dt = $('#dTpl'); if (dt) dt.onchange = () => { UI.drawerTpl = dt.value; render(); };
 }
 function loadCsv() {
@@ -740,6 +781,21 @@ root.addEventListener('click', async (e) => {
     case 'batchStop': if (UI.batch) UI.batch.stop = true; break;
     case 'batchClose': UI.batch = null; render(); break;
     case 'more': UI.limit += 300; render(); break;
+    case 'section': UI.section = actEl.dataset.s; UI.limit = 200; render(); break;
+    case 'verifyAll': if (!UI.verifying) runVerifyAll(); break;
+    case 'verifyStop': if (UI.verifying) UI.verifying.stop = true; break;
+    case 'verifyClose': UI.verifying = null; render(); break;
+    case 'saveDraft': busy(() => act('updateLead', { id: UI.lead, patch: { draft: { subject: $('#drSubject').value, body: $('#drBody').value } } })); break;
+    case 'copyDraft': { const l = D.leads.find((x) => x.id === UI.lead); const txt = `Subject: ${$('#drSubject').value}\n\n${$('#drBody').value}\n\n${(D.settings.signature || '').trim()}`; navigator.clipboard.writeText(txt).then(() => toast('Copied'), () => toast('Copy failed', true)); break; }
+    case 'sendDraft': busy(async () => {
+      const l = D.leads.find((x) => x.id === UI.lead);
+      await act('updateLead', { id: UI.lead, patch: { draft: { subject: $('#drSubject').value, body: $('#drBody').value } } }, true);
+      if (!confirm(`Send your personal email to ${l.email}?`)) return;
+      try {
+        const r = await api('/api/send', { method: 'POST', body: { leadId: UI.lead, useDraft: true, manualConfirm: true } });
+        const i = D.leads.findIndex((x) => x.id === UI.lead); D.leads[i] = r.lead; D.sentToday = r.sentToday; render(); toast('Sent');
+      } catch (err) { toast(err.message, true); await refresh(); }
+    }); break;
     case 'range': UI.range = Number(actEl.dataset.n); render(); break;
     case 'export': exportCsv(); break;
     case 'dialOutcome': busy(() => dialOutcome(actEl.dataset.outcome)); break;
@@ -760,7 +816,7 @@ root.addEventListener('click', async (e) => {
       const l = D.leads.find((x) => x.id === UI.lead);
       if (!confirm(`Send this email to ${l.email}?`)) return;
       try {
-        const r = await api('/api/send', { method: 'POST', body: { leadId: UI.lead, templateId: actEl.dataset.tpl } });
+        const r = await api('/api/send', { method: 'POST', body: { leadId: UI.lead, templateId: actEl.dataset.tpl, manualConfirm: true } });
         const i = D.leads.findIndex((x) => x.id === UI.lead); D.leads[i] = r.lead; D.sentToday = r.sentToday; UI.drawerTpl = null; render(); toast('Sent');
       } catch (err) { toast(err.message, true); await refresh(); }
     }); break;

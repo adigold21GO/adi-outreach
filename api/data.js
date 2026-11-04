@@ -3,7 +3,7 @@ import { loadDb, mutateDb, loadAuth } from '../lib/db.js';
 import { encrypt } from '../lib/crypto.js';
 import { verifyEmail, providerCredits, normalizeEmail } from '../lib/verify.js';
 import { listMessages, getMeta } from '../lib/gmail.js';
-import { publicDb, addEvent, advance, setStatus, domainOf, STATUSES, phoneKey, nameKey } from '../lib/model.js';
+import { publicDb, addEvent, advance, setStatus, domainOf, STATUSES, phoneKey, nameKey, SECTIONS } from '../lib/model.js';
 
 const LEAD_FIELDS = ['company', 'firstName', 'lastName', 'title', 'email', 'phone', 'website', 'industry', 'city', 'state', 'notes', 'tags', 'linkedin', 'detail', 'task'];
 const CALL_OUTCOMES = ['no_answer', 'voicemail', 'talked', 'booked', 'not_interested', 'wrong_number', 'call_back'];
@@ -138,6 +138,26 @@ export const POST = guarded(async (request) => {
     return json({ ok: true, results: result });
   }
 
+  // Verifies up to 10 leads per call (the page loops over them). Spends one verifier credit per lead.
+  if (a === 'verifyBatch') {
+    const { db } = await loadDb();
+    const ids = (b.ids || []).slice(0, 10);
+    const leads = ids.map((id) => db.leads.find((x) => x.id === id)).filter((l) => l && l.email);
+    const out = await Promise.all(leads.map(async (l) => ({ id: l.id, v: await verifyEmail(db.settings, l.email) })));
+    const hardError = out.find((r) => r.v.status === 'error' && /key|credit|api/i.test(r.v.reason));
+    if (hardError && !out.some((r) => r.v.status !== 'error')) throw new HttpError(hardError.v.reason, 502);
+    await mutateDb((d) => {
+      for (const { id, v } of out) {
+        if (v.status === 'error') continue;
+        const l = d.leads.find((x) => x.id === id);
+        if (!l) continue;
+        l.verification = { status: v.ok ? 'valid' : 'rejected', reason: v.reason, checkedAt: v.checkedAt, provider: v.provider || null };
+        addEvent(l, { type: 'verified', result: l.verification.status, reason: v.reason });
+      }
+    });
+    return json({ ok: true, results: out.map(({ id, v }) => ({ id, ok: v.ok, status: v.status, reason: v.reason })) });
+  }
+
   if (a === 'credits') {
     const { db } = await loadDb();
     return json({ ok: true, credits: await providerCredits(db.settings) });
@@ -159,6 +179,11 @@ export const POST = guarded(async (request) => {
             }
           }
           l[k] = v;
+        }
+        if ('section' in (b.patch || {}) && b.patch.section in SECTIONS) l.section = b.patch.section;
+        if ('draft' in (b.patch || {})) {
+          const dr = b.patch.draft || {};
+          l.draft = { subject: String(dr.subject || '').trim().slice(0, 200), body: String(dr.body || '').slice(0, 5000) };
         }
         if ('client' in (b.patch || {})) l.client = { ...(l.client || {}), ...b.patch.client };
         l.updatedAt = Date.now();

@@ -248,3 +248,61 @@ test('end to end', async () => {
   assert.ok(r.j.results.length > 0 && r.j.results.length <= 25);
   console.log('emails sent in test:', sentRaw.length);
 });
+
+test('sammy sections are manual-only, verifyBatch updates leads', async () => {
+  const { readyForFirst, dueFollowUps } = await import(`${P}/lib/outreach.js`);
+  await call(data.POST, '/api/data', 'POST', { action: 'saveSettings', settings: { dailyCap: 50, autopilot: { enabled: true, firstTouchPerDay: 20, includeFollowUps: true } } });
+  let r = await call(imp.POST, '/api/import', 'POST', { candidates: [
+    { company: 'Brother Co', firstName: 'Sam', email: 'sam@brotherco.com', section: 'sammy-ut', draftSubject: 'Fellow Sammy at UT', draftBody: 'Hi Sam,\n\nPersonal note for Sam.' },
+    { company: 'Other Chapter LLC', firstName: 'Oz', email: 'oz@otherchapter.com', section: 'sammy-other', draftSubject: 'Sammy to Sammy', draftBody: 'Hi Oz,\n\nNote for Oz.' },
+    { company: 'Main Biz', firstName: 'Mo', email: 'mo@mainbiz.com', task: 'calls' },
+  ] });
+  assert.equal(r.j.added, 3, JSON.stringify(r.j));
+  let d = (await call(data.GET, '/api/data')).j;
+  const sam = d.leads.find((l) => l.email === 'sam@brotherco.com');
+  const oz = d.leads.find((l) => l.email === 'oz@otherchapter.com');
+  const mo = d.leads.find((l) => l.email === 'mo@mainbiz.com');
+  assert.equal(sam.section, 'sammy-ut'); assert.equal(oz.section, 'sammy-other'); assert.equal(mo.section, 'main');
+  assert.equal(sam.draft.subject, 'Fellow Sammy at UT');
+
+  // autopilot / batch queues never include Sammy leads
+  const { loadDb } = await import(`${P}/lib/db.js`);
+  const { db } = await loadDb();
+  const ready = readyForFirst(db).map((l) => l.email);
+  assert.ok(ready.includes('mo@mainbiz.com'));
+  assert.ok(!ready.includes('sam@brotherco.com') && !ready.includes('oz@otherchapter.com'));
+  assert.ok(!dueFollowUps(db, Date.now() + 1e12).some((l) => l.section && l.section !== 'main'));
+
+  // a send without the explicit manual confirmation is refused, with or without the draft
+  r = await call(send.POST, '/api/send', 'POST', { leadId: sam.id, templateId: 'first-touch' });
+  assert.equal(r.status, 409); assert.match(r.j.error, /Manual-only/);
+  r = await call(send.POST, '/api/send', 'POST', { leadId: sam.id, useDraft: true });
+  assert.equal(r.status, 409); assert.match(r.j.error, /Manual-only/);
+
+  // manual send of the personal draft works and adds the signature
+  const before = sentRaw.length;
+  r = await call(send.POST, '/api/send', 'POST', { leadId: sam.id, useDraft: true, manualConfirm: true });
+  assert.equal(r.status, 200, JSON.stringify(r.j));
+  const mime = Buffer.from(sentRaw[before].raw, 'base64url').toString();
+  assert.match(mime, /Subject: Fellow Sammy at UT/);
+  const bodyText = Buffer.from(mime.split('\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString();
+  assert.match(bodyText, /Personal note for Sam\./); assert.match(bodyText, /Test Sender/);
+
+  // autopilot run (cron) never touches oz
+  await sync.GET(new Request('https://app.test/api/sync?cron=1', { headers: { authorization: 'Bearer cron123' } }));
+  d = (await call(data.GET, '/api/data')).j;
+  assert.ok(!d.leads.find((l) => l.id === oz.id).history.some((h) => h.type === 'email_sent'), 'autopilot must skip sammy');
+
+  // verifyBatch updates unverified leads
+  const { mutateDb } = await import(`${P}/lib/db.js`);
+  await mutateDb((x) => { const l = x.leads.find((y) => y.id === oz.id); l.verification = { status: 'unverified', reason: 'test', checkedAt: 0 }; });
+  r = await call(data.POST, '/api/data', 'POST', { action: 'verifyBatch', ids: [oz.id] });
+  assert.equal(r.status, 200, JSON.stringify(r.j));
+  assert.equal(r.j.results[0].ok, true);
+  d = (await call(data.GET, '/api/data')).j;
+  assert.equal(d.leads.find((l) => l.id === oz.id).verification.status, 'valid');
+
+  // section can be changed from the lead panel
+  r = await call(data.POST, '/api/data', 'POST', { action: 'updateLead', id: mo.id, patch: { section: 'sammy-other' } });
+  assert.equal(r.j.data.leads.find((l) => l.id === mo.id).section, 'sammy-other');
+});
