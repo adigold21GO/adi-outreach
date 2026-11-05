@@ -247,6 +247,8 @@ export const POST = guarded(async (request) => {
         if (!t.name?.trim() || !t.subject?.trim() || !t.body?.trim()) throw new HttpError('Template needs a name, subject and body');
         const clean = { id: t.id || `t-${Date.now().toString(36)}`, name: t.name.trim(), subject: t.subject.trim(), body: t.body, kind: t.kind === 'followup' ? 'followup' : 'first' };
         const i = d.templates.findIndex((x) => x.id === clean.id);
+        const sec = 'section' in t ? t.section : i >= 0 ? d.templates[i].section : undefined;
+        if (sec && sec in SECTIONS) clean.section = sec;
         if (i >= 0) d.templates[i] = clean; else d.templates.push(clean);
         break;
       }

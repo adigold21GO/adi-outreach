@@ -307,3 +307,35 @@ test('sammy sections are manual-only, verifyBatch updates leads', async () => {
   r = await call(data.POST, '/api/data', 'POST', { action: 'updateLead', id: mo.id, patch: { section: 'sammy-other' } });
   assert.equal(r.j.data.leads.find((l) => l.id === mo.id).section, 'sammy-other');
 });
+
+test('first-email A/B: stable split, B only with a detail', async () => {
+  const { firstTemplateFor, TEMPLATE_B } = await import(`${P}/lib/model.js`);
+  const tpls = [{ id: 'first-touch', kind: 'first', subject: 'S', body: 'Hi {first_name}' }, { ...TEMPLATE_B }, { id: 'follow-up', kind: 'followup', subject: 'Re', body: 'x' }];
+  const withDetail = Array.from({ length: 200 }, (_, i) => ({ id: 'lead' + i, detail: 'your new location' }));
+  const picks = withDetail.map((l) => firstTemplateFor(tpls, l).id);
+  const nB = picks.filter((x) => x === 'first-touch-b').length;
+  assert.ok(nB > 70 && nB < 130, `split ${nB}/200`);
+  assert.deepEqual(withDetail.map((l) => firstTemplateFor(tpls, l).id), picks, 'stable');
+  const noDetail = Array.from({ length: 50 }, (_, i) => ({ id: 'x' + i }));
+  assert.ok(noDetail.every((l) => firstTemplateFor(tpls, l).id === 'first-touch'));
+  const sentB = { id: 'z', history: [{ type: 'email_sent', kind: 'first', templateId: 'first-touch-b' }] };
+  assert.equal(firstTemplateFor(tpls, sentB).id, 'first-touch-b');
+  const d = (await call(data.GET, '/api/data')).j;
+  assert.ok(d.templates.some((t) => t.id === 'first-touch-b'), 'variant B seeded');
+});
+
+test('automated UT Sammy section uses its own template and Autopilot can send it', async () => {
+  const { firstTemplateFor, TEMPLATE_SAMMY, TEMPLATE_B, isManualOnly } = await import(`${P}/lib/model.js`);
+  const tpls = [{ id: 'first-touch', kind: 'first', subject: 'S', body: 'Hi' }, { ...TEMPLATE_B }, { ...TEMPLATE_SAMMY }];
+  const sammy = { id: 's1', section: 'sammy-ut-auto', detail: 'I saw you co-founded NNN Retail Advisors in 2009.' };
+  assert.equal(firstTemplateFor(tpls, sammy).id, 'first-sammy-ut');
+  assert.equal(isManualOnly(sammy), false);
+  for (let i = 0; i < 40; i++) assert.notEqual(firstTemplateFor(tpls, { id: 'm' + i, detail: 'x' }).id, 'first-sammy-ut');
+  const words = TEMPLATE_SAMMY.body.split(/\s+/).length;
+  assert.ok(words < 75, `brief: ${words} words`);
+  const d = (await call(data.GET, '/api/data')).j;
+  const t = d.templates.find((x) => x.id === 'first-sammy-ut');
+  assert.ok(t, 'sammy template seeded');
+  const r = await call(data.POST, '/api/data', 'POST', { action: 'saveTemplate', template: { id: t.id, name: t.name, subject: t.subject, body: t.body + ' ', kind: 'first' } });
+  assert.equal(r.j.data.templates.find((x) => x.id === 'first-sammy-ut').section, 'sammy-ut-auto', 'section kept on edit');
+});

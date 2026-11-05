@@ -2,7 +2,7 @@ import { json, error, isAuthed, isCron } from '../lib/http.js';
 import { runSync } from '../lib/sync.js';
 import { loadDb, mutateDb } from '../lib/db.js';
 import { sendToLead, readyForFirst, dueFollowUps } from '../lib/outreach.js';
-import { weekdayInTZ, sentToday } from '../lib/model.js';
+import { weekdayInTZ, sentToday, firstTemplateFor } from '../lib/model.js';
 import { readFile } from 'node:fs/promises';
 import { importCandidates, MAX_PER_CALL } from '../lib/importer.js';
 
@@ -37,11 +37,12 @@ async function autopilot(started) {
   const wd = weekdayInTZ();
   if (wd === 'Sat' || wd === 'Sun') return { skipped: 'weekend' };
   const first = db.templates.find((t) => t.kind === 'first');
+  const pick = (l) => (firstTemplateFor(db.templates, l) || first).id;
   const follow = db.templates.find((t) => t.kind === 'followup');
   // Alternate follow-ups and first emails so both make progress each day,
   // even when the daily cap or time limit stops the run early.
   const fups = ap.includeFollowUps && follow ? dueFollowUps(db).map((l) => [l.id, follow.id]) : [];
-  const firsts = first ? readyForFirst(db).slice(0, ap.firstTouchPerDay).map((l) => [l.id, first.id]) : [];
+  const firsts = first ? readyForFirst(db).slice(0, ap.firstTouchPerDay).map((l) => [l.id, pick(l)]) : [];
   const queue = [];
   for (let i = 0; i < Math.max(fups.length, firsts.length); i++) {
     if (fups[i]) queue.push(fups[i]);

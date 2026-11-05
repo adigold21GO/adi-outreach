@@ -15,7 +15,7 @@ const UI = {
   flash: null,
 };
 
-const SECTIONS = { main: 'Main', 'sammy-ut': 'Sammy alumni: UT Austin', 'sammy-other': 'Sammy alumni: other chapters', 'ut-alumni': 'UT Austin alumni (general)' };
+const SECTIONS = { main: 'Main', 'sammy-ut': 'Sammy alumni: UT Austin', 'sammy-other': 'Sammy alumni: other chapters', 'ut-alumni': 'UT Austin alumni (general)', 'sammy-ut-auto': 'Sammy alumni: UT Austin (automated)' };
 const MANUAL = new Set(['sammy-ut', 'sammy-other', 'ut-alumni']);
 const secOf = (l) => (l.section in SECTIONS ? l.section : 'main');
 const manualOnly = (l) => MANUAL.has(secOf(l));
@@ -53,6 +53,21 @@ const sent = (l) => (l.history || []).filter((h) => h.type === 'email_sent');
 const replied = (l) => (l.history || []).some((h) => h.type === 'reply');
 const lastTouch = (l) => Math.max(0, ...(l.history || []).filter((h) => ['email_sent', 'call', 'reply'].includes(h.type)).map((h) => h.t));
 const tplFirst = () => D.templates.find((t) => t.kind === 'first') || D.templates[0];
+// Same rule as the server (lib/model.js firstTemplateFor): stable per-lead pick among first emails.
+function tplFirstFor(l) {
+  const all = D.templates.filter((t) => t.kind === 'first');
+  const own = all.filter((t) => t.section === secOf(l));
+  const firsts = own.length ? own : all.filter((t) => !t.section);
+  if (!firsts.length) return all[0] || tplFirst();
+  const sentFirst = (l.history || []).find((h) => h.type === 'email_sent' && h.kind === 'first');
+  if (sentFirst) return firsts.find((t) => t.id === sentFirst.templateId) || firsts[0];
+  const ok = firsts.filter((t) => !/\{detail\}/.test(`${t.subject}\n${t.body}`) || (l.detail || '').trim());
+  if (!ok.length) return firsts[0];
+  let h = 0;
+  for (const ch of String(l.id || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const wanted = firsts[h % firsts.length];
+  return ok.includes(wanted) ? wanted : ok[0];
+}
 const tplFollow = () => D.templates.find((t) => t.kind === 'followup');
 
 function renderTpl(t, l) {
@@ -256,7 +271,7 @@ async function runBatch(kind) {
   if (kind === 'follow') queue = D.leads.filter(isDueFollow).slice(0, left).map((l) => ({ leadId: l.id, templateId: tplFollow().id, company: l.company }));
   else {
     const n = Math.max(1, Math.min(left, Number($('#batchN')?.value) || 0));
-    queue = D.leads.filter(isReady).slice(0, n).map((l) => ({ leadId: l.id, templateId: tplFirst().id, company: l.company }));
+    queue = D.leads.filter(isReady).slice(0, n).map((l) => ({ leadId: l.id, templateId: tplFirstFor(l).id, company: l.company }));
   }
   if (!queue.length) return;
   if (!confirm(`Send ${queue.length} email${queue.length > 1 ? 's' : ''} from ${D.gmail.email || 'Gmail'}? Keep this tab open until it finishes.`)) return;
@@ -367,7 +382,7 @@ function vLeads() {
     <select id="fVerif" style="width:auto">${[['all', 'Any verification'], ['valid', 'Verified'], ['unverified', 'Not verified'], ['rejected', 'Failed check']].map(([k, v]) => `<option value="${k}" ${UI.verif === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
     <span class="muted">${list.length} shown</span></div>
   <div class="tablewrap"><table><thead><tr><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Status</th><th>Last touch</th></tr></thead><tbody>
-  ${list.slice(0, UI.limit).map((l) => `<tr data-lead="${l.id}"><td><b>${esc(l.company)}</b>${manualOnly(l) ? ` <span class="pill">${({ 'sammy-ut': 'Sammy UT', 'sammy-other': 'Sammy', 'ut-alumni': 'UT alum' })[secOf(l)]}</span>` : ''}<div class="muted small">${esc([l.industry, l.city].filter(Boolean).join(' · '))}</div></td>
+  ${list.slice(0, UI.limit).map((l) => `<tr data-lead="${l.id}"><td><b>${esc(l.company)}</b>${secOf(l) !== 'main' ? ` <span class="pill">${({ 'sammy-ut': 'Sammy UT', 'sammy-other': 'Sammy', 'ut-alumni': 'UT alum', 'sammy-ut-auto': 'Sammy UT auto' })[secOf(l)]}</span>` : ''}<div class="muted small">${esc([l.industry, l.city].filter(Boolean).join(' · '))}</div></td>
     <td>${esc(person(l))}<div class="muted small">${esc(l.title || '')}</div></td>
     <td class="small">${esc(l.email)}<div>${vpill(l)}</div></td><td class="small">${esc(l.phone || '')}</td>
     <td>${pill(l.status)}${l.needsResponse ? ' <span class="pill replied">Needs reply</span>' : ''}</td><td class="small muted">${ago(lastTouch(l))}</td></tr>`).join('')}
@@ -416,7 +431,7 @@ function drawer() {
   if (!l) { UI.lead = null; return ''; }
   const tpls = D.templates;
   const hasFirst = sent(l).some((h) => h.kind !== 'followup');
-  const defTpl = (hasFirst ? tplFollow() : tplFirst()) || tpls[0];
+  const defTpl = (hasFirst ? tplFollow() : tplFirstFor(l)) || tpls[0];
   const tid = UI.drawerTpl && tpls.some((t) => t.id === UI.drawerTpl) ? UI.drawerTpl : defTpl.id;
   const msg = renderTpl(tpls.find((t) => t.id === tid), l);
   const f = (k, label, type = 'text') => `<div><label>${label}</label><input data-f="${k}" type="${type}" value="${esc(l[k] || '')}"></div>`;
@@ -505,7 +520,7 @@ function vResults() {
   const tOf = (h) => h.at || h.t;
   const rows = {}; const rowFor = (t) => (rows[dayKey(t)] ||= { first: 0, follow: 0, reply: 0, bounce: 0 });
   let first = 0; let follow = 0; let bounces = 0; let optOuts = 0;
-  const emailed = new Set(); const repliedLeads = []; const ind = {};
+  const emailed = new Set(); const repliedLeads = []; const ind = {}; const ver = {};
   const afterFollow = { first: 0, follow: 0 };
   for (const l of D.leads) {
     const hs = l.history || [];
@@ -522,6 +537,11 @@ function vResults() {
       const before = hs.filter((h) => h.type === 'email_sent' && h.t <= tOf(real[0]));
       if (before.length) afterFollow[before.at(-1).kind === 'followup' ? 'follow' : 'first']++;
       repliedLeads.push({ l, r });
+    }
+    const firstSent = hs.find((h) => h.type === 'email_sent' && h.kind === 'first');
+    if (firstSent && inR(tOf(firstSent))) {
+      const tk = firstSent.templateId || 'unknown';
+      const y = (ver[tk] ||= { n: 0, r: 0, m: 0 }); y.n++; if (real.length) y.r++; if (['meeting', 'client'].includes(l.status)) y.m++;
     }
     if (mine.length) {
       const k = (l.industry || 'Other').trim() || 'Other';
@@ -562,6 +582,10 @@ function vResults() {
       ${industries.length ? `<table><thead><tr><th>Industry</th><th>Emailed</th><th>Replied</th><th>Rate</th><th>Meetings</th></tr></thead><tbody>
       ${industries.map(([k, x]) => `<tr><td>${esc(k)}</td><td>${x.n}</td><td>${x.r}</td><td><b>${pct(x.r, x.n)}</b></td><td>${x.m}</td></tr>`).join('')}</tbody></table>`
       : '<div class="empty">Nothing sent in this period.</div>'}</div>
+    <div class="card"><h2>By email version</h2><p class="muted small" style="margin-top:-4px">Each new lead gets one first-email version. Compare once each version has about 60 emailed.</p>
+      ${Object.keys(ver).length ? `<table><thead><tr><th>Version</th><th>Emailed</th><th>Replied</th><th>Rate</th><th>Meetings</th></tr></thead><tbody>
+      ${Object.entries(ver).sort((a, b) => b[1].n - a[1].n).map(([k, x]) => `<tr><td>${esc((D.templates.find((t) => t.id === k) || {}).name || (k === 'draft' ? 'Personal draft' : k))}</td><td>${x.n}</td><td>${x.r}</td><td><b>${pct(x.r, x.n)}</b></td><td>${x.m}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">No first emails in this period.</div>'}</div>
     <div class="card"><h2>Autopilot runs</h2>
       ${runs.length ? `<table><thead><tr><th>When</th><th>Sent</th><th>Skipped</th><th>Note</th></tr></thead><tbody>
       ${runs.map((r) => `<tr><td>${when(r.t)}</td><td>${r.sent}</td><td>${r.failed}</td><td class="small muted">${esc((r.errors || [])[0] || '')}</td></tr>`).join('')}</tbody></table>`
@@ -590,6 +614,7 @@ function vTemplates() {
   <div class="grid g2"><div class="card">
     <div class="row">${D.templates.map((x) => `<button class="btn small ${x.id === t?.id ? 'primary' : ''}" data-act="pickTpl" data-id="${x.id}">${esc(x.name)}</button>`).join('')}<button class="btn small" data-act="newTpl">+ New</button></div>
     ${t ? `<label>Name</label><input id="tName" value="${esc(t.name)}">
+    ${t.section ? `<p class="muted small">Used only for the ${esc(SECTIONS[t.section] || t.section)} section.</p>` : ''}
     <label>Type</label><select id="tKind"><option value="first" ${t.kind !== 'followup' ? 'selected' : ''}>First email (new thread)</option><option value="followup" ${t.kind === 'followup' ? 'selected' : ''}>Follow-up (replies in the same thread)</option></select>
     <label>Subject</label><input id="tSubject" value="${esc(t.subject)}">
     <label>Body</label><textarea id="tBody" style="min-height:240px">${esc(t.body)}</textarea>
