@@ -74,7 +74,16 @@ function renderTpl(t, l) {
   const s = D.settings;
   const vars = { first_name: (l.firstName || '').trim() || 'there', last_name: l.lastName || '', company: l.company || 'your business', city: l.city || '', industry: l.industry || '', title: l.title || '', my_name: s.fromName || '', detail: (l.detail || '').trim(), task: (l.task || '').trim() };
   const fill = (x) => String(x || '').replace(/\{(\w+)\}/g, (m, k) => (k in vars && vars[k] !== '' ? vars[k] : m));
-  return { subject: fill(t.subject), body: `${fill(t.body).trim()}\n\n${(s.signature || '').trim()}` };
+  return { subject: fill(t.subject), body: `${fill(t.body).trim()}\n\n${footerFor(l)}` };
+}
+// Same rule as lib/model.js footer(): UT alumni sign off with "Hook 'Em!".
+const UT_SECS = new Set(['sammy-ut', 'sammy-ut-auto', 'ut-alumni']);
+function footerFor(l) {
+  const sig = (D.settings.signature || '').trim();
+  if (!l || !UT_SECS.has(secOf(l))) return sig;
+  const lines = sig.split('\n');
+  if (lines.length && /^(thanks|thank you|best|cheers|regards|best regards|sincerely|talk soon)[,!.]?\s*(either way)?[,!.]?$/i.test(lines[0].trim())) lines.shift();
+  return ["Hook 'Em!", ...lines].join('\n').trim();
 }
 
 function toast(msg, bad = false) {
@@ -445,7 +454,7 @@ function drawer() {
 
     <div class="section"><h2>Contact</h2><div class="fields">
       ${f('firstName', 'First name')}${f('lastName', 'Last name')}${f('title', 'Title')}${f('email', 'Email', 'email')}${f('phone', 'Phone', 'tel')}${f('website', 'Website')}${f('industry', 'Industry')}${f('city', 'City')}</div>
-      <label>Personalization: {detail} (something specific you noticed about them)</label><input data-f="detail" value="${esc(l.detail || '')}" placeholder="e.g. you run three locations and take bookings by phone">
+      <label>Personalization: {detail} ${secOf(l) === 'main' ? '(something specific you noticed about them)' : '(one personal sentence that opens the email)'}</label><input data-f="detail" value="${esc(l.detail || '')}" placeholder="${secOf(l) === 'main' ? 'e.g. you run three locations and take bookings by phone' : 'e.g. I saw you co-founded NNN Retail Advisors in 2009 and have grown it in Dallas since.'}">
       <label>Personalization: {task} (the job you'd help with)</label><input data-f="task" value="${esc(l.task || '')}" placeholder="e.g. after-hours calls and appointment requests">
       <label>Notes</label><textarea data-f="notes">${esc(l.notes || '')}</textarea>
       <div class="row" style="margin-top:8px"><button class="btn" data-act="saveLead">Save changes</button>
@@ -455,11 +464,13 @@ function drawer() {
       <label>Client notes</label><textarea id="cNotes">${esc(l.client?.notes || '')}</textarea><div style="margin-top:8px"><button class="btn" data-act="saveClient">Save</button></div></div>` : ''}
 
     ${manualOnly(l) ? `<div class="section"><h2>Personal email (manual only)</h2>
-      <p class="muted small">This lead is never emailed by Autopilot or a batch send. Edit the draft, then send it yourself. Your signature is added under it.</p>
-      <label>Subject</label><input id="drSubject" value="${esc(l.draft?.subject || '')}">
-      <label>Body</label><textarea id="drBody" style="min-height:220px">${esc(l.draft?.body || '')}</textarea>
+      <p class="muted small">This lead is never emailed by Autopilot or a batch send. Edit the draft, then send it yourself. Your signature is added under it${UT_SECS.has(secOf(l)) ? ", starting with Hook 'Em!" : ''}.</p>
+      ${(() => { const st = tplFirstFor(l); const m = st ? renderTpl(st, l) : null; const sub = l.draft?.subject || (m ? m.subject : ''); const bod = l.draft?.body || (st ? renderTpl({ ...st, body: st.body }, { ...l }).body.replace(`\n\n${footerFor(l)}`, '') : '');
+        return `<p class="muted small">${l.draft?.body ? 'Edited draft.' : `From the template <a href="#templates" data-act="openTpl" data-id="${st?.id || ''}">${esc(st?.name || '')}</a>.`}${/\{detail\}/.test(bod) ? ' Add a personal line in Personalization below to fill {detail}.' : ''}</p>
+      <label>Subject</label><input id="drSubject" value="${esc(sub)}">
+      <label>Body</label><textarea id="drBody" style="min-height:220px">${esc(bod)}</textarea>`; })()}
       <div class="row" style="margin-top:8px"><button class="btn" data-act="saveDraft">Save draft</button><button class="btn" data-act="copyDraft">Copy</button>
-        <button class="btn primary" data-act="sendDraft" ${l.draft?.body && !sent(l).some((h) => h.kind !== 'followup') ? '' : 'disabled'}>Send from ${esc(D.gmail.email || 'Gmail')}</button></div></div>` : ''}
+        <button class="btn primary" data-act="sendDraft" ${!sent(l).some((h) => h.kind !== 'followup') ? '' : 'disabled'}>Send from ${esc(D.gmail.email || 'Gmail')}</button></div></div>` : ''}
     <div class="section"><h2>${manualOnly(l) ? 'Template email' : 'Email'}</h2>
       <select id="dTpl">${tpls.map((t) => `<option value="${t.id}" ${t.id === tid ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
       <div class="preview" style="margin-top:8px"><b>${esc(msg.subject)}</b>\n\n${esc(msg.body)}</div>
@@ -608,13 +619,14 @@ function vClients() {
 function vTemplates() {
   const t = D.templates.find((x) => x.id === UI.tplId) || D.templates[0];
   UI.tplId = t?.id;
-  const sample = D.leads.find((l) => l.firstName && l.company) || { firstName: 'Maria', company: 'Lone Star Dental', city: 'Dallas', industry: 'Dental' };
+  const sample = (t?.section && D.leads.find((l) => secOf(l) === t.section && l.firstName)) || D.leads.find((l) => l.firstName && l.company && (!t?.section || secOf(l) === t.section)) || { firstName: 'Maria', company: 'Lone Star Dental', city: 'Dallas', industry: 'Dental', section: t?.section, detail: t?.section ? 'I saw you co-founded your firm in 2009.' : 'you just opened a second location' };
   const m = t ? renderTpl(t, sample) : { subject: '', body: '' };
   return `<h1>Templates</h1><p class="sub">Merge fields: <code>{first_name}</code> <code>{company}</code> <code>{city}</code> <code>{industry}</code> <code>{title}</code> <code>{detail}</code> <code>{task}</code> (the last two are filled per lead). Any field left unfilled blocks the send. Your signature is added automatically.</p>
   <div class="grid g2"><div class="card">
     <div class="row">${D.templates.map((x) => `<button class="btn small ${x.id === t?.id ? 'primary' : ''}" data-act="pickTpl" data-id="${x.id}">${esc(x.name)}</button>`).join('')}<button class="btn small" data-act="newTpl">+ New</button></div>
     ${t ? `<label>Name</label><input id="tName" value="${esc(t.name)}">
-    ${t.section ? `<p class="muted small">Used only for the ${esc(SECTIONS[t.section] || t.section)} section.</p>` : ''}
+    <label>Used for</label><select id="tSection"><option value="">All regular leads${t.kind === 'first' ? ' (A/B test)' : ''}</option>${Object.entries(SECTIONS).filter(([k]) => k !== 'main').map(([k, v]) => `<option value="${k}" ${t.section === k ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
+    ${t.section ? `<p class="muted small">Linked to ${D.leads.filter((l) => secOf(l) === t.section).length} lead${D.leads.filter((l) => secOf(l) === t.section).length === 1 ? '' : 's'} in ${esc(SECTIONS[t.section])}. ${MANUAL.has(t.section) ? 'Manual-only: open a lead to review and send.' : 'Autopilot sends it.'}</p>` : ''}
     <label>Type</label><select id="tKind"><option value="first" ${t.kind !== 'followup' ? 'selected' : ''}>First email (new thread)</option><option value="followup" ${t.kind === 'followup' ? 'selected' : ''}>Follow-up (replies in the same thread)</option></select>
     <label>Subject</label><input id="tSubject" value="${esc(t.subject)}">
     <label>Body</label><textarea id="tBody" style="min-height:240px">${esc(t.body)}</textarea>
@@ -823,6 +835,7 @@ root.addEventListener('click', async (e) => {
     case 'batchStop': if (UI.batch) UI.batch.stop = true; break;
     case 'batchClose': UI.batch = null; render(); break;
     case 'more': UI.limit += 300; render(); break;
+    case 'openTpl': UI.tplId = actEl.dataset.id || null; UI.lead = null; break;
     case 'focusSend': { const c = $('#sendCard'); if (c) { c.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' }); $('#batchN')?.focus(); } break; }
     case 'goCallbacks': UI.dialFilter = 'callbacks'; UI.dialIndex = 0; break;
     case 'section': UI.section = actEl.dataset.s; UI.limit = 200; render(); break;
@@ -830,7 +843,7 @@ root.addEventListener('click', async (e) => {
     case 'verifyStop': if (UI.verifying) UI.verifying.stop = true; break;
     case 'verifyClose': UI.verifying = null; render(); break;
     case 'saveDraft': busy(() => act('updateLead', { id: UI.lead, patch: { draft: { subject: $('#drSubject').value, body: $('#drBody').value } } })); break;
-    case 'copyDraft': { const l = D.leads.find((x) => x.id === UI.lead); const txt = `Subject: ${$('#drSubject').value}\n\n${$('#drBody').value}\n\n${(D.settings.signature || '').trim()}`; navigator.clipboard.writeText(txt).then(() => toast('Copied'), () => toast('Copy failed', true)); break; }
+    case 'copyDraft': { const l = D.leads.find((x) => x.id === UI.lead); const txt = `Subject: ${$('#drSubject').value}\n\n${$('#drBody').value}\n\n${footerFor(l)}`; navigator.clipboard.writeText(txt).then(() => toast('Copied'), () => toast('Copy failed', true)); break; }
     case 'sendDraft': busy(async () => {
       const l = D.leads.find((x) => x.id === UI.lead);
       await act('updateLead', { id: UI.lead, patch: { draft: { subject: $('#drSubject').value, body: $('#drBody').value } } }, true);
@@ -869,7 +882,7 @@ root.addEventListener('click', async (e) => {
     case 'deleteLead': if (confirm('Delete this lead? If it was emailed, the address stays on the exclusion list.')) { const id = UI.lead; UI.lead = null; busy(() => act('deleteLead', { id })); } break;
     case 'pickTpl': UI.tplId = actEl.dataset.id; render(); break;
     case 'newTpl': busy(async () => { await act('saveTemplate', { template: { name: 'New template', subject: 'Subject', body: 'Hi {first_name},\n\n', kind: 'first' } }, true); UI.tplId = D.templates.at(-1).id; render(); }); break;
-    case 'saveTpl': busy(() => act('saveTemplate', { template: { id: UI.tplId, name: $('#tName').value, kind: $('#tKind').value, subject: $('#tSubject').value, body: $('#tBody').value } })); break;
+    case 'saveTpl': busy(() => act('saveTemplate', { template: { id: UI.tplId, name: $('#tName').value, kind: $('#tKind').value, section: $('#tSection').value, subject: $('#tSubject').value, body: $('#tBody').value } })); break;
     case 'delTpl': if (confirm('Delete this template?')) busy(async () => { await act('deleteTemplate', { id: UI.tplId }); UI.tplId = null; render(); }); break;
     case 'parseCsv': loadCsv(); break;
     case 'runImport': if (!UI.importing) runImport(); break;

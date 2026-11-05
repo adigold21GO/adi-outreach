@@ -339,3 +339,34 @@ test('automated UT Sammy section uses its own template and Autopilot can send it
   const r = await call(data.POST, '/api/data', 'POST', { action: 'saveTemplate', template: { id: t.id, name: t.name, subject: t.subject, body: t.body + ' ', kind: 'first' } });
   assert.equal(r.j.data.templates.find((x) => x.id === 'first-sammy-ut').section, 'sammy-ut-auto', 'section kept on edit');
 });
+
+test("UT alumni sign off with Hook 'Em!", async () => {
+  const { footer } = await import(`${P}/lib/model.js`);
+  const st = { signature: 'Thanks,\nAdi Gold\nVolvera AI' };
+  assert.equal(footer(st, { section: 'sammy-ut-auto' }), "Hook 'Em!\nAdi Gold\nVolvera AI");
+  assert.equal(footer(st, { section: 'ut-alumni' }), "Hook 'Em!\nAdi Gold\nVolvera AI");
+  assert.equal(footer({ signature: 'Adi Gold' }, { section: 'sammy-ut' }), "Hook 'Em!\nAdi Gold");
+  assert.equal(footer(st, { section: 'sammy-other' }), st.signature);
+  assert.equal(footer(st, {}), st.signature);
+});
+
+test('alumni templates are seeded once and linked to their sections', async () => {
+  const { firstTemplateFor } = await import(`${P}/lib/model.js`);
+  let d = (await call(data.GET, '/api/data')).j;
+  const want = { 'sammy-ut-auto': 'first-sammy-ut', 'sammy-ut': 'first-sammy-ut-manual', 'sammy-other': 'first-sammy-other', 'ut-alumni': 'first-ut-alumni' };
+  for (const [sec, id] of Object.entries(want)) {
+    const t = d.templates.find((x) => x.id === id);
+    assert.ok(t && t.section === sec, `${id} seeded for ${sec}`);
+    assert.equal(firstTemplateFor(d.templates, { id: 'q' + sec, section: sec, detail: 'x' }).id, id);
+    assert.ok(t.body.split(/\s+/).length < 75, `${id} is brief`);
+  }
+  assert.ok(!['first-sammy-ut', 'first-sammy-ut-manual', 'first-sammy-other', 'first-ut-alumni'].includes(firstTemplateFor(d.templates, { id: 'reg', detail: 'x' }).id), 'regular leads never get alumni templates');
+  // deleting one does not bring it back
+  await call(data.POST, '/api/data', 'POST', { action: 'deleteTemplate', id: 'first-ut-alumni' });
+  d = (await call(data.GET, '/api/data')).j;
+  assert.ok(!d.templates.some((x) => x.id === 'first-ut-alumni'), 'stays deleted');
+  // section can be changed from the Templates page
+  const t = d.templates.find((x) => x.id === 'first-sammy-other');
+  const r = await call(data.POST, '/api/data', 'POST', { action: 'saveTemplate', template: { ...t, section: 'ut-alumni' } });
+  assert.equal(r.j.data.templates.find((x) => x.id === 'first-sammy-other').section, 'ut-alumni');
+});
