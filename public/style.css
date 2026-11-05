@@ -1,18 +1,18 @@
-/* Volvera Outreach. Palette from Volvera: warm paper, ink, amber. */
+/* Volvera Outreach. White page with Volvera's ink and amber. */
 :root {
-  --page: #F3EEE4; --paper: #FFFCF6; --soft: #F4EEE2; --ink: #1B1B19; --ink-2: #55534D; --muted: #6C6861;
-  --line: rgba(27, 27, 25, .12); --line-2: rgba(27, 27, 25, .2);
+  --page: #FFFFFF; --paper: #FFFFFF; --side: #FAF8F5; --soft: #F5F3EF; --ink: #1B1B19; --ink-2: #55534D; --muted: #6C6861;
+  --line: rgba(27, 27, 25, .11); --line-2: rgba(27, 27, 25, .2);
   --amber: #E4A345; --amber-ink: #8E5A0B; --amber-soft: #F8E7C8;
   --good: #1F4A2C; --good-soft: #DCEBDF; --lav: #4B3F6B; --lav-soft: #E6E1EF;
   --bad: #962F1F; --bad-soft: #F5DDD5;
-  --on-ink: #FFFCF6; --on-ink-muted: rgba(255, 252, 246, .66);
+  --on-ink: #FFFFFF; --on-ink-muted: rgba(255, 255, 255, .66);
   --serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
   --sans: "Libre Franklin", "Helvetica Neue", Arial, sans-serif;
   --r: 6px; color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --page: #161512; --paper: #1E1D1A; --soft: #262420; --ink: #F1ECE2; --ink-2: #C9C3B7; --muted: #A39D92;
+    --page: #161512; --paper: #1E1D1A; --side: #1A1916; --soft: #262420; --ink: #F1ECE2; --ink-2: #C9C3B7; --muted: #A39D92;
     --line: rgba(241, 236, 226, .12); --line-2: rgba(241, 236, 226, .22);
     --amber: #E4A345; --amber-ink: #F0BE72; --amber-soft: #3A2C14;
     --good: #9CD0AA; --good-soft: #1D3123; --lav: #C9BFE3; --lav-soft: #2C2738; --bad: #F0A493; --bad-soft: #3D211B;
@@ -45,7 +45,7 @@ label.check input { width: auto; accent-color: var(--ink); }
 
 /* Shell */
 .app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
-nav.side { position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; padding: 20px 14px 16px; background: var(--paper); border-right: 1px solid var(--line); }
+nav.side { position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; padding: 20px 14px 16px; background: var(--side); border-right: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 8px; padding: 0 8px 22px; color: var(--ink); }
 .brand .logo { width: 22px; height: 22px; flex: none; }
 .brand .wm { font-family: var(--serif); font-size: 24px; line-height: 1; letter-spacing: -.2px; }
