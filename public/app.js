@@ -26,6 +26,9 @@ const OUTCOMES = [
   ['call_back', 'Call back'], ['not_interested', 'Not interested'], ['wrong_number', 'Wrong number'],
 ];
 
+const LOGO = `<svg class="logo" viewBox="0 0 100 100" aria-hidden="true"><path d="M74 20 C 86 46 76 72 48 87" fill="none" stroke="#E4A345" stroke-width="11" stroke-linecap="round"/><path d="M28 24 L 50 84" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round"/><circle cx="30" cy="11" r="7" fill="currentColor"/></svg>`;
+const brand = (sub = 'Outreach') => `<div class="brand">${LOGO}<span class="wm">volvera</span><span class="sep">/</span><span class="an">${esc(sub)}</span></div>`;
+
 // ---------- helpers ----------
 const dayKey = (t = Date.now()) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t));
 function ago(t) {
@@ -94,7 +97,7 @@ const isReady = (l) => !manualOnly(l) && l.status === 'new' && l.verification?.s
 async function boot() {
   const s = await fetch('/api/session').then((r) => r.json()).catch(() => ({}));
   if (!s.secretSet || !s.passcodeSet) {
-    root.innerHTML = `<div class="login card"><h1>Almost ready</h1><p class="sub">This app needs ${!s.passcodeSet ? '<b>APP_PASSCODE</b>' : ''}${!s.passcodeSet && !s.secretSet ? ' and ' : ''}${!s.secretSet ? '<b>APP_SECRET</b>' : ''} set in Vercel → Project → Settings → Environment Variables, then a redeploy.</p></div>`;
+    root.innerHTML = `<div class="login card">${brand()}<h1>Almost ready</h1><p class="sub">This app needs ${!s.passcodeSet ? '<b>APP_PASSCODE</b>' : ''}${!s.passcodeSet && !s.secretSet ? ' and ' : ''}${!s.secretSet ? '<b>APP_SECRET</b>' : ''} set in Vercel → Project → Settings → Environment Variables, then a redeploy.</p></div>`;
     return;
   }
   if (!s.authed) return renderLogin();
@@ -102,8 +105,8 @@ async function boot() {
   syncQuietly();
 }
 function renderLogin() {
-  root.innerHTML = `<form class="login card" id="login"><h1>Outreach</h1><p class="sub">Enter your passcode.</p>
-    <input type="password" id="pass" autocomplete="current-password" autofocus><div class="row" style="margin-top:12px"><button class="btn primary">Sign in</button></div></form>`;
+  root.innerHTML = `<form class="login card" id="login">${brand()}<h1>Sign in</h1><p class="sub">Enter your passcode to open your outreach.</p>
+    <label for="pass">Passcode</label><input type="password" id="pass" autocomplete="current-password" autofocus><div class="row" style="margin-top:14px"><button class="btn primary">Sign in</button></div></form>`;
   $('#login').onsubmit = async (e) => {
     e.preventDefault();
     try { await api('/api/session', { method: 'POST', body: { passcode: $('#pass').value } }); await refresh(); syncQuietly(); } catch (err) { toast(err.message, true); }
@@ -131,13 +134,20 @@ function render() {
   if (!D) return;
   const { name } = route();
   const replies = D.leads.filter((l) => l.needsResponse).length;
+  const callbacksDue = D.leads.filter((l) => l.callbackAt && l.callbackAt <= Date.now() + 864e5 && !['client', 'lost', 'do_not_contact'].includes(l.status)).length;
   const views = { today: vToday, dialer: vDialer, leads: vLeads, pipeline: vPipeline, results: vResults, clients: vClients, templates: vTemplates, import: vImport, settings: vSettings };
-  const nav = [['today', 'Today', replies], ['dialer', 'Dialer'], ['leads', 'Leads'], ['pipeline', 'Pipeline'], ['results', 'Results'], ['clients', 'Clients'], ['templates', 'Templates'], ['import', 'Import'], ['settings', 'Settings']];
+  const groups = [
+    ['Work', [['today', 'Today', replies], ['dialer', 'Calls', callbacksDue], ['leads', 'Leads'], ['pipeline', 'Pipeline']]],
+    ['Track', [['results', 'Results'], ['clients', 'Clients']]],
+    ['Setup', [['templates', 'Templates'], ['import', 'Import'], ['settings', 'Settings']]],
+  ];
+  const pct = Math.min(100, Math.round((D.sentToday / Math.max(1, D.settings.dailyCap)) * 100));
   const scroll = $('main')?.scrollTop;
   root.innerHTML = `<div class="app">
-    <nav class="side"><div class="brand">${esc(D.settings.fromName ? D.settings.fromName.split(" ")[0] + " Outreach" : "Outreach")}<small>${esc(D.gmail.connected ? D.gmail.email : 'Gmail not connected')}</small></div>
-      ${nav.map(([k, label, c]) => `<a href="#${k}" class="${name === k ? 'on' : ''}">${label}${c ? `<span class="count">${c}</span>` : ''}</a>`).join('')}
-      <div class="foot">${D.sentToday}/${D.settings.dailyCap} emails today<br>Inbox checked ${ago(D.sync?.lastSyncAt)}</div>
+    <nav class="side" aria-label="Main">${brand()}
+      ${groups.map(([g, items]) => `<div class="group"><div class="gname">${g}</div>${items.map(([k, label, c]) => `<a href="#${k}" class="${name === k ? 'on' : ''}"${name === k ? ' aria-current="page"' : ''}><span>${label}</span>${c ? `<span class="count">${c}</span>` : ''}</a>`).join('')}</div>`).join('')}
+      <div class="foot"><div class="meter"><div style="width:${pct}%"></div></div><b>${D.sentToday} of ${D.settings.dailyCap}</b> emails sent today
+        <div class="muted">${D.gmail.connected ? esc(D.gmail.email) : '<a href="#settings">Connect Gmail</a>'}</div><div class="muted">Inbox checked ${ago(D.sync?.lastSyncAt)}</div></div>
     </nav>
     <main>${(views[name] || vToday)()}</main></div>
     ${UI.lead ? drawer() : ''}`;
@@ -170,13 +180,20 @@ function vToday() {
   for (const l of D.leads) for (const h of l.history || []) if (['email_sent', 'reply', 'call', 'bounce', 'status'].includes(h.type) && !(h.type === 'status' && h.auto)) events.push({ l, h });
   events.sort((a, b) => b.h.t - a.h.t);
   const b = UI.batch;
-  return `<h1>Today</h1><p class="sub">${new Date().toLocaleDateString('en-US', { timeZone: TZ, weekday: 'long', month: 'long', day: 'numeric' })}</p>
+  const steps = [];
+  if (needs.length) steps.push({ n: needs.length, what: needs.length === 1 ? 'reply to answer' : 'replies to answer', btn: `<button class="btn amber" data-lead="${needs[0].id}">Open ${esc(needs[0].company)}</button>` });
+  if (callbacks.length) steps.push({ n: callbacks.length, what: callbacks.length === 1 ? 'call back due' : 'call backs due', btn: '<a class="btn amber" href="#dialer" data-act="goCallbacks">Start calls</a>' });
+  if (due.length && left && tplFollow()) steps.push({ n: due.length, what: due.length === 1 ? 'follow-up due' : 'follow-ups due', btn: `<button class="btn amber" data-act="batch" data-kind="follow" ${b ? 'disabled' : ''}>Send ${Math.min(due.length, left)}</button>` });
+  if (ready.length && left) steps.push({ n: ready.length, what: 'verified leads not emailed yet', btn: '<button class="btn amber" data-act="focusSend">Choose how many</button>' });
+  const nextUp = `<section class="nextup" aria-label="Next up"><div class="nu-head"><h2>Next up</h2><span>${new Date().toLocaleDateString('en-US', { timeZone: TZ, weekday: 'long', month: 'long', day: 'numeric' })}</span></div>
+    ${steps.length ? `<div class="nu-items">${steps.slice(0, 3).map((x) => `<div class="nu-item"><div class="nu-n">${x.n}</div><div class="nu-what">${x.what}</div>${x.btn}</div>`).join('')}</div>`
+      : `<p class="nu-done">You're caught up. ${D.leads.length ? 'New replies show up here as soon as the inbox is checked.' : '<a href="#import">Import your first leads</a> to get started.'}</p>`}</section>`;
+  return `<h1>Today</h1>
   ${flash()}
+  ${nextUp}
   ${unknown.length ? `<div class="notice warn">${unknown.length} send${unknown.length > 1 ? 's' : ''} may or may not have gone out. Open ${unknown.map((l) => `<a href="#" data-lead="${l.id}">${esc(l.company)}</a>`).join(', ')} and confirm against Gmail Sent.</div>` : ''}
   <div class="kpis">
     <div class="kpi"><div class="n">${D.sentToday}<span class="muted" style="font-size:15px"> / ${D.settings.dailyCap}</span></div><div class="l">Emails sent today</div></div>
-    <div class="kpi"><div class="n">${needs.length}</div><div class="l">Replies to answer</div></div>
-    <div class="kpi"><div class="n">${due.length}</div><div class="l">Follow-ups due</div></div>
     <div class="kpi"><div class="n">${calls}</div><div class="l">Calls today</div></div>
     <div class="kpi"><div class="n">${ready.length}</div><div class="l">Verified, not yet emailed</div></div>
   </div>
@@ -187,7 +204,7 @@ function vToday() {
         const r = [...l.history].reverse().find((h) => h.type === 'reply');
         return `<li><div class="main"><a href="#" data-lead="${l.id}"><b>${esc(l.company)}</b></a> <span class="muted">${esc(person(l))}</span><div class="muted small clip">${esc(unent(r?.snippet || ''))}</div></div><span class="muted small">${ago(r?.at || r?.t)}</span></li>`;
       }).join('')}</ul>` : '<div class="empty">No unanswered replies. Replies are pulled from Gmail automatically.</div>'}</div>
-      <div class="card"><div class="row"><h2 style="margin:0">Send emails</h2><span class="spacer"></span><span class="muted small">${left} left today</span></div>
+      <div class="card" id="sendCard"><div class="row"><h2 style="margin:0">Send emails</h2><span class="spacer"></span><span class="muted small">${left} left today</span></div>
         ${b ? batchView() : `
         <p class="muted small" style="margin:6px 0 12px">Sends one at a time with a short random pause, the way a person would. Follow-ups go first, in the original thread.</p>
         <div class="row"><button class="btn" data-act="batch" data-kind="follow" ${due.length && left && tplFollow() ? '' : 'disabled'}>Send ${Math.min(due.length, left)} follow-up${Math.min(due.length, left) === 1 ? '' : 's'}</button>
@@ -284,7 +301,7 @@ function vDialer() {
   if (UI.dialIndex >= list.length) UI.dialIndex = Math.max(0, list.length - 1);
   const l = list[UI.dialIndex];
   const filters = [['new', 'New leads'], ['emailed', 'Emailed, no reply'], ['callbacks', 'Call backs'], ['engaged', 'Replied / meeting'], ['all', 'Everyone with a phone']];
-  return `<h1>Dialer</h1><p class="sub">Work through calls one lead at a time. Press 1–7 to log the outcome.</p>
+  return `<h1>Calls</h1><p class="sub">Work through calls one lead at a time. Press 1 to 7 to log the outcome.</p>
   <div class="row" style="margin-bottom:14px"><select id="dialFilter" style="width:auto">${filters.map(([k, v]) => `<option value="${k}" ${UI.dialFilter === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
     <span class="muted">${list.length ? `${UI.dialIndex + 1} of ${list.length}` : ''}</span></div>
   ${!l ? '<div class="card empty">No one in this queue.</div>' : `
@@ -472,9 +489,9 @@ function vPipeline() {
   </div>
   <div class="card" style="margin-bottom:14px"><h2>Last 14 days</h2><div class="bars">${days.map((d) => `<div class="day" title="${d}: ${series[d].e} emails, ${series[d].r} replies, ${series[d].c} calls">
     <div class="row" style="gap:2px;align-items:flex-end;height:100%;width:100%;justify-content:center">
-    <div class="b" style="height:${(series[d].e / max) * 100}%;background:var(--accent)"></div><div class="b" style="height:${(series[d].r / max) * 100}%;background:var(--good)"></div><div class="b" style="height:${(series[d].c / max) * 100}%;background:var(--warn)"></div></div>
+    <div class="b" style="height:${(series[d].e / max) * 100}%;background:var(--amber)"></div><div class="b" style="height:${(series[d].r / max) * 100}%;background:var(--good)"></div><div class="b" style="height:${(series[d].c / max) * 100}%;background:var(--lav)"></div></div>
     <span class="lbl">${Number(d.slice(8))}</span></div>`).join('')}</div>
-    <div class="legend"><span><i style="background:var(--accent)"></i>Emails</span><span><i style="background:var(--good)"></i>Replies</span><span><i style="background:var(--warn)"></i>Calls</span></div></div>
+    <div class="legend"><span><i style="background:var(--amber)"></i>Emails</span><span><i style="background:var(--good)"></i>Replies</span><span><i style="background:var(--lav)"></i>Calls</span></div></div>
   <div class="board">${BOARD.map((s) => `<div class="col" data-col="${s}"><h3>${STATUS_LABEL[s]}<span class="muted">${by[s].length}</span></h3>
     ${by[s].sort((a, b) => lastTouch(b) - lastTouch(a)).slice(0, 60).map((l) => `<div class="tile" draggable="true" data-drag="${l.id}" data-lead="${l.id}"><b>${esc(l.company)}</b><div class="muted">${esc(person(l) || l.email)}</div><div class="muted">${ago(lastTouch(l))}</div></div>`).join('')}
     ${by[s].length > 60 ? `<div class="muted small">+${by[s].length - 60} more in Leads</div>` : ''}</div>`).join('')}</div>`;
@@ -781,6 +798,8 @@ root.addEventListener('click', async (e) => {
     case 'batchStop': if (UI.batch) UI.batch.stop = true; break;
     case 'batchClose': UI.batch = null; render(); break;
     case 'more': UI.limit += 300; render(); break;
+    case 'focusSend': { const c = $('#sendCard'); if (c) { c.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' }); $('#batchN')?.focus(); } break; }
+    case 'goCallbacks': UI.dialFilter = 'callbacks'; UI.dialIndex = 0; break;
     case 'section': UI.section = actEl.dataset.s; UI.limit = 200; render(); break;
     case 'verifyAll': if (!UI.verifying) runVerifyAll(); break;
     case 'verifyStop': if (UI.verifying) UI.verifying.stop = true; break;
