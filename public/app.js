@@ -15,8 +15,8 @@ const UI = {
   flash: null,
 };
 
-const SECTIONS = { main: 'Main', 'sammy-ut': 'Sammy alumni: UT Austin', 'sammy-other': 'Sammy alumni: other chapters' };
-const MANUAL = new Set(['sammy-ut', 'sammy-other']);
+const SECTIONS = { main: 'Main', 'sammy-ut': 'Sammy alumni: UT Austin', 'sammy-other': 'Sammy alumni: other chapters', 'ut-alumni': 'UT Austin alumni (general)' };
+const MANUAL = new Set(['sammy-ut', 'sammy-other', 'ut-alumni']);
 const secOf = (l) => (l.section in SECTIONS ? l.section : 'main');
 const manualOnly = (l) => MANUAL.has(secOf(l));
 const STATUS_LABEL = { new: 'New', contacted: 'Contacted', replied: 'Replied', meeting: 'Meeting', client: 'Client', lost: 'Lost', bounced: 'Bounced', do_not_contact: 'Do not contact' };
@@ -350,7 +350,7 @@ function vLeads() {
     <select id="fVerif" style="width:auto">${[['all', 'Any verification'], ['valid', 'Verified'], ['unverified', 'Not verified'], ['rejected', 'Failed check']].map(([k, v]) => `<option value="${k}" ${UI.verif === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
     <span class="muted">${list.length} shown</span></div>
   <div class="tablewrap"><table><thead><tr><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Status</th><th>Last touch</th></tr></thead><tbody>
-  ${list.slice(0, UI.limit).map((l) => `<tr data-lead="${l.id}"><td><b>${esc(l.company)}</b>${manualOnly(l) ? ` <span class="pill">${secOf(l) === 'sammy-ut' ? 'Sammy UT' : 'Sammy'}</span>` : ''}<div class="muted small">${esc([l.industry, l.city].filter(Boolean).join(' · '))}</div></td>
+  ${list.slice(0, UI.limit).map((l) => `<tr data-lead="${l.id}"><td><b>${esc(l.company)}</b>${manualOnly(l) ? ` <span class="pill">${({ 'sammy-ut': 'Sammy UT', 'sammy-other': 'Sammy', 'ut-alumni': 'UT alum' })[secOf(l)]}</span>` : ''}<div class="muted small">${esc([l.industry, l.city].filter(Boolean).join(' · '))}</div></td>
     <td>${esc(person(l))}<div class="muted small">${esc(l.title || '')}</div></td>
     <td class="small">${esc(l.email)}<div>${vpill(l)}</div></td><td class="small">${esc(l.phone || '')}</td>
     <td>${pill(l.status)}${l.needsResponse ? ' <span class="pill replied">Needs reply</span>' : ''}</td><td class="small muted">${ago(lastTouch(l))}</td></tr>`).join('')}

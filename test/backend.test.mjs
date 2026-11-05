@@ -256,8 +256,9 @@ test('sammy sections are manual-only, verifyBatch updates leads', async () => {
     { company: 'Brother Co', firstName: 'Sam', email: 'sam@brotherco.com', section: 'sammy-ut', draftSubject: 'Fellow Sammy at UT', draftBody: 'Hi Sam,\n\nPersonal note for Sam.' },
     { company: 'Other Chapter LLC', firstName: 'Oz', email: 'oz@otherchapter.com', section: 'sammy-other', draftSubject: 'Sammy to Sammy', draftBody: 'Hi Oz,\n\nNote for Oz.' },
     { company: 'Main Biz', firstName: 'Mo', email: 'mo@mainbiz.com', task: 'calls' },
+    { company: 'Longhorn Co', firstName: 'Lu', email: 'lu@longhornco.com', section: 'ut-alumni', draftSubject: 'Fellow Longhorn', draftBody: 'Hi Lu,\n\nNote.' },
   ] });
-  assert.equal(r.j.added, 3, JSON.stringify(r.j));
+  assert.equal(r.j.added, 4, JSON.stringify(r.j));
   let d = (await call(data.GET, '/api/data')).j;
   const sam = d.leads.find((l) => l.email === 'sam@brotherco.com');
   const oz = d.leads.find((l) => l.email === 'oz@otherchapter.com');
@@ -270,7 +271,7 @@ test('sammy sections are manual-only, verifyBatch updates leads', async () => {
   const { db } = await loadDb();
   const ready = readyForFirst(db).map((l) => l.email);
   assert.ok(ready.includes('mo@mainbiz.com'));
-  assert.ok(!ready.includes('sam@brotherco.com') && !ready.includes('oz@otherchapter.com'));
+  assert.ok(!ready.includes('sam@brotherco.com') && !ready.includes('oz@otherchapter.com') && !ready.includes('lu@longhornco.com'));
   assert.ok(!dueFollowUps(db, Date.now() + 1e12).some((l) => l.section && l.section !== 'main'));
 
   // a send without the explicit manual confirmation is refused, with or without the draft
