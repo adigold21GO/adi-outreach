@@ -525,7 +525,7 @@ function vResults() {
     }
     if (mine.length) {
       const k = (l.industry || 'Other').trim() || 'Other';
-      const x = (ind[k] ||= { n: 0, r: 0 }); x.n++; if (real.length) x.r++;
+      const x = (ind[k] ||= { n: 0, r: 0, m: 0 }); x.n++; if (real.length) x.r++; if (['meeting', 'client'].includes(l.status)) x.m++;
     }
   }
   repliedLeads.sort((a, b) => tOf(b.r) - tOf(a.r));
@@ -536,7 +536,7 @@ function vResults() {
   const open = repliedLeads.length - interested - notNow;
   const dayList = Object.keys(rows).sort().reverse();
   const fmtDay = (k) => new Date(`${k}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  const industries = Object.entries(ind).sort((a, b) => b[1].n - a[1].n).slice(0, 12);
+  const industries = Object.entries(ind).sort((a, b) => (b[1].r / b[1].n || 0) - (a[1].r / a[1].n || 0) || b[1].n - a[1].n).slice(0, 12);
   const runs = (D.autopilotLog || []).filter((r) => inR(r.t)).slice(-12).reverse();
   const chip = (n, label) => `<button class="btn${UI.range === n ? ' primary' : ''}" data-act="range" data-n="${n}">${label}</button>`;
   return `<h1>Results</h1><p class="sub">How your outreach is doing. Updates every time the inbox is checked.</p>
@@ -558,9 +558,9 @@ function vResults() {
       ${dayList.length ? `<table><thead><tr><th>Day</th><th>First</th><th>Follow-up</th><th>Replies</th><th>Bounces</th></tr></thead><tbody>
       ${dayList.map((k) => `<tr><td>${fmtDay(k)}</td><td>${rows[k].first}</td><td>${rows[k].follow}</td><td>${rows[k].reply}</td><td>${rows[k].bounce}</td></tr>`).join('')}</tbody></table>`
       : '<div class="empty">Nothing sent in this period.</div>'}</div>
-    <div class="card"><h2>By industry</h2>
-      ${industries.length ? `<table><thead><tr><th>Industry</th><th>Emailed</th><th>Replied</th><th>Rate</th></tr></thead><tbody>
-      ${industries.map(([k, x]) => `<tr><td>${esc(k)}</td><td>${x.n}</td><td>${x.r}</td><td>${pct(x.r, x.n)}</td></tr>`).join('')}</tbody></table>`
+    <div class="card"><h2>By industry</h2><p class="muted small" style="margin-top:-4px">The industry test compares these with the same email. Treat rates as noise until an industry has about 60 emailed.</p>
+      ${industries.length ? `<table><thead><tr><th>Industry</th><th>Emailed</th><th>Replied</th><th>Rate</th><th>Meetings</th></tr></thead><tbody>
+      ${industries.map(([k, x]) => `<tr><td>${esc(k)}</td><td>${x.n}</td><td>${x.r}</td><td><b>${pct(x.r, x.n)}</b></td><td>${x.m}</td></tr>`).join('')}</tbody></table>`
       : '<div class="empty">Nothing sent in this period.</div>'}</div>
     <div class="card"><h2>Autopilot runs</h2>
       ${runs.length ? `<table><thead><tr><th>When</th><th>Sent</th><th>Skipped</th><th>Note</th></tr></thead><tbody>
