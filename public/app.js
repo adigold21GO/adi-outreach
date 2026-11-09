@@ -761,7 +761,8 @@ function vSettings() {
   </div>
   <div class="card"><h2>Autopilot</h2><p class="muted small">Each weekday around 9 a.m. Central, sends due follow-ups and up to N first emails to verified leads, within your daily max. Off by default.</p>
     <label class="check"><input type="checkbox" id="apOn" ${s.autopilot.enabled ? 'checked' : ''}> Turn on autopilot</label>
-    <div class="fields"><div><label>First emails per day</label><input id="apN" type="number" min="0" max="150" value="${s.autopilot.firstTouchPerDay}"></div></div>
+    <div class="fields"><div><label>First emails per day</label><input id="apN" type="number" min="0" max="150" value="${s.autopilot.firstTouchPerDay}"></div>
+    <div><label>UT alumni emails per day (on top of the max)</label><input id="apAlum" type="number" min="0" max="50" value="${s.autopilot.alumniPerDay || 0}"></div></div>
     <label class="check"><input type="checkbox" id="apFu" ${s.autopilot.includeFollowUps ? 'checked' : ''}> Include follow-ups</label>
     ${D.autopilotLog.length ? `<div class="small muted" style="margin-top:8px">Last run ${ago(D.autopilotLog.at(-1).t)}: ${D.autopilotLog.at(-1).sent} sent${D.autopilotLog.at(-1).failed ? `, ${D.autopilotLog.at(-1).failed} skipped` : ''}</div>` : ''}
   </div>
@@ -773,7 +774,7 @@ function settingsPayload() {
   const out = {
     fromName: v('#fromName'), signature: v('#sig'), dailyCap: v('#cap'), followUpDays: v('#fuDays'), maxFollowUps: v('#fuMax'),
     reverifyDays: v('#reverify'), allowRoleEmails: $('#allowRole').checked, verifierProvider: v('#vProv'), googleClientId: v('#gId'),
-    autopilot: { enabled: $('#apOn').checked, firstTouchPerDay: v('#apN'), includeFollowUps: $('#apFu').checked },
+    autopilot: { enabled: $('#apOn').checked, firstTouchPerDay: v('#apN'), includeFollowUps: $('#apFu').checked, alumniPerDay: v('#apAlum') },
   };
   if (v('#vKey')) out.verifierKey = v('#vKey');
   if (v('#gSecret')) out.googleClientSecret = v('#gSecret');

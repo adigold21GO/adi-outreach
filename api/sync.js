@@ -1,8 +1,8 @@
 import { json, error, isAuthed, isCron } from '../lib/http.js';
 import { runSync } from '../lib/sync.js';
 import { loadDb, mutateDb } from '../lib/db.js';
-import { sendToLead, readyForFirst, dueFollowUps } from '../lib/outreach.js';
-import { weekdayInTZ, sentToday, firstTemplateFor } from '../lib/model.js';
+import { sendToLead, readyForFirst, readyForAlumniFirst, dueFollowUps } from '../lib/outreach.js';
+import { weekdayInTZ, sentToday, alumniSentToday, firstTemplateFor } from '../lib/model.js';
 import { readFile } from 'node:fs/promises';
 import { importCandidates, MAX_PER_CALL } from '../lib/importer.js';
 
@@ -48,18 +48,34 @@ async function autopilot(started) {
     if (fups[i]) queue.push(fups[i]);
     if (firsts[i]) queue.push(firsts[i]);
   }
-  let room = db.settings.dailyCap - sentToday(db);
-  const log = { t: Date.now(), sent: 0, failed: 0, errors: [] };
-  for (const [leadId, templateId] of queue) {
-    if (room <= 0 || Date.now() - started > 250000) break;
+  // Regular sends use dailyCap; UT alumni sends use their own alumniPerDay allowance on top.
+  const alumniSent = alumniSentToday(db);
+  let room = db.settings.dailyCap - (sentToday(db) - alumniSent);
+  let alumniRoom = Math.max(0, (Number(ap.alumniPerDay) || 0) - alumniSent);
+  const alumni = alumniRoom ? readyForAlumniFirst(db).slice(0, alumniRoom).map((l) => [l.id, pick(l)]) : [];
+  const log = { t: Date.now(), sent: 0, failed: 0, alumniSent: 0, errors: [] };
+  let stop = false;
+  const send = async (leadId, templateId, source) => {
     try {
-      await sendToLead(leadId, templateId, { source: 'autopilot' });
-      log.sent++; room--;
+      await sendToLead(leadId, templateId, { source });
+      log.sent++;
+      return true;
     } catch (e) {
       log.failed++; log.errors.push(e.message);
-      if (e.status === 429 || /Gmail is not connected|signed this app out/.test(e.message)) break;
+      if (/Gmail is not connected|signed this app out/.test(e.message)) stop = true;
+      return false;
+    } finally { await sleep(4000 + Math.random() * 4000); }
+  };
+  // Interleave one alumni email after every few regular ones so both buckets progress each run.
+  let ai = 0;
+  for (let i = 0; i < queue.length || ai < alumni.length; i++) {
+    if (stop || Date.now() - started > 250000) break;
+    if (i < queue.length && room > 0) { if (await send(queue[i][0], queue[i][1], 'autopilot')) room--; }
+    if ((i % 3 === 2 || i >= queue.length || room <= 0) && ai < alumni.length && alumniRoom > 0) {
+      const [id, tid] = alumni[ai++];
+      if (await send(id, tid, 'autopilot-alumni')) { alumniRoom--; log.alumniSent++; }
     }
-    await sleep(4000 + Math.random() * 4000);
+    if (room <= 0 && (ai >= alumni.length || alumniRoom <= 0)) break;
   }
   log.errors = log.errors.slice(0, 5);
   await mutateDb((d) => { d.autopilotLog.push(log); d.autopilotLog = d.autopilotLog.slice(-60); });

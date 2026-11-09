@@ -270,6 +270,7 @@ export const POST = guarded(async (request) => {
           st.autopilot.enabled = !!s.autopilot.enabled;
           st.autopilot.firstTouchPerDay = Math.max(0, Math.min(150, Number(s.autopilot.firstTouchPerDay) || 0));
           st.autopilot.includeFollowUps = !!s.autopilot.includeFollowUps;
+          if ('alumniPerDay' in s.autopilot) st.autopilot.alumniPerDay = Math.max(0, Math.min(50, Number(s.autopilot.alumniPerDay) || 0));
         }
         if (s.verifierProvider && ['millionverifier', 'zerobounce'].includes(s.verifierProvider)) st.verifier.provider = s.verifierProvider;
         if (s.verifierKey) st.verifier.apiKeyEnc = encrypt(String(s.verifierKey).trim());
