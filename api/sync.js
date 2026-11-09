@@ -30,6 +30,47 @@ async function importPending() {
   return { added, checked };
 }
 
+// Alumni finder. seed/alumni-queue.json holds alumni business owners found by research (name and
+// company domain, no email). Each cron run tries the common owner address formats for a few of them,
+// verifies each with the verifier, and adds the first confirmed one to its section. A person is
+// marked done once tried, so nobody is retried or charged twice; verifier outages are retried.
+const ALUMNI_PER_RUN = 12;
+export function emailGuesses(first, last, domain) {
+  const f = String(first || '').toLowerCase().replace(/[^a-z]/g, '');
+  const l = String(last || '').toLowerCase().replace(/[^a-z]/g, '');
+  const d = String(domain || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+  if (!f || !d) return [];
+  const out = [`${f}@${d}`];
+  if (l) out.push(`${f[0]}${l}@${d}`, `${f}.${l}@${d}`, `${f}${l}@${d}`, `${f}${l[0]}@${d}`);
+  return [...new Set(out)];
+}
+async function alumniFinder(started, budgetMs) {
+  let queue;
+  try { queue = JSON.parse(await readFile(new URL('../seed/alumni-queue.json', import.meta.url), 'utf8')); } catch { return null; }
+  const { db } = await loadDb();
+  if (!db.settings.verifier?.apiKeyEnc) return { skipped: 'no verifier key' };
+  const key = (r) => `${String(r.domain || '').toLowerCase()}|${String(r.lastName || '').toLowerCase()}`;
+  const done = new Set(db.alumniDone || []);
+  const todo = queue.filter((r) => r.domain && r.firstName && !done.has(key(r))).slice(0, ALUMNI_PER_RUN);
+  const out = { tried: 0, added: 0, addedList: [] };
+  for (const r of todo) {
+    if (Date.now() - started > budgetMs) break;
+    let outage = false;
+    for (const email of r.email ? [r.email] : emailGuesses(r.firstName, r.lastName, r.domain)) {
+      let res;
+      try { [res] = await importCandidates([{ ...r, email, website: r.website || `https://${r.domain}` }]); } catch { outage = true; break; }
+      if (!res) break;
+      if (res.added) { out.added++; out.addedList.push(email); break; }
+      if (res.status === 'error') { outage = true; break; }
+      // Stop guessing when the domain can't confirm any mailbox or the company is already known.
+      if (/catch|accept.?all|already|skipped|exclu/i.test(res.reason || '')) break;
+    }
+    out.tried++;
+    if (!outage) await mutateDb((d) => { d.alumniDone = Array.from(new Set([...(d.alumniDone || []), key(r)])); });
+  }
+  return out;
+}
+
 async function autopilot(started) {
   const { db } = await loadDb();
   const ap = db.settings.autopilot;
@@ -89,8 +130,10 @@ async function handle(request) {
   try {
     const sync = await runSync();
     const pending = cron ? await importPending() : null;
+    const alumni = cron ? await alumniFinder(started, 60000) : null;
     const ap = cron ? await autopilot(started) : null;
-    return json({ ok: true, sync, pending, autopilot: ap });
+    if (alumni) await mutateDb((d) => { d.alumniLog = [...(d.alumniLog || []), { t: Date.now(), tried: alumni.tried, added: alumni.added }].slice(-60); });
+    return json({ ok: true, sync, pending, alumni, autopilot: ap });
   } catch (e) {
     console.error(e);
     return error(e.publicMessage || e.message, e.status || 500);
