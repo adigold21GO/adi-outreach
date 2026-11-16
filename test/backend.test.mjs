@@ -224,6 +224,10 @@ test('end to end', async () => {
   assert.equal(r.j.data.leads.find((l) => l.id === di.id).status, 'meeting');
   r = await call(data.POST, '/api/data', 'POST', { action: 'setStatus', id: di.id, status: 'client' });
   assert.ok(r.j.data.leads.find((l) => l.id === di.id).client);
+  r = await call(data.POST, '/api/data', 'POST', { action: 'updateLead', id: di.id, patch: { deal: { service: ' Call agent ', monthly: '300', oneTime: -5, next: 'Demo Friday' } } });
+  const dealt = r.j.data.leads.find((l) => l.id === di.id);
+  assert.deepEqual(dealt.deal, { service: 'Call agent', monthly: 300, oneTime: 0, next: 'Demo Friday' });
+  assert.equal(dealt.client.monthly, 300);
 
   // concurrent writes don't lose data
   await Promise.all(Array.from({ length: 6 }, (_, i) => call(data.POST, '/api/data', 'POST', { action: 'addNote', id: di.id, text: `n${i}` })));

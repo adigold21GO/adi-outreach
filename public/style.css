@@ -102,6 +102,28 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .kpi .n { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; }
 .kpi .l { color: var(--muted); font-size: 12.5px; }
 
+/* Revenue */
+.rtitle { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; margin-bottom: 18px; }
+.rtitle h1, .rtitle .sub { margin: 0; }
+.rkpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 26px; }
+.rkpi { border: 1px solid var(--line); background: var(--paper); padding: 16px 18px; }
+.rkpi .l, .rkpi .s { color: var(--muted); font-size: 13.5px; }
+.rkpi .n { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; margin: 4px 0 8px; }
+.rhead { font-size: 16px; margin: 0 0 10px; }
+.rhead span { color: var(--muted); font-weight: 400; margin-left: 4px; }
+.deal { border: 1px solid var(--line); border-radius: 12px; background: var(--paper); padding: 16px 18px; margin-bottom: 10px; cursor: pointer; }
+.deal:hover { border-color: var(--line-2); background: var(--soft); }
+.deal + .rhead { margin-top: 26px; }
+.deal-top { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.deal-top b { font-size: 17px; font-weight: 700; }
+.deal .price { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.deal .price.none { color: var(--bad); font-weight: 600; }
+.deal-meta { color: var(--muted); margin: 6px 0; }
+.deal-note { overflow-wrap: anywhere; }
+.empty-deal { color: var(--muted); cursor: default; }
+.empty-deal:hover { background: var(--paper); border-color: var(--line); }
+@media (max-width: 900px) { .rkpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
 /* Lists and tables */
 .list { margin: 0; padding: 0; list-style: none; }
 .list li { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }

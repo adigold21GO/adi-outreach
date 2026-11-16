@@ -186,6 +186,12 @@ export const POST = guarded(async (request) => {
           l.draft = { subject: String(dr.subject || '').trim().slice(0, 200), body: String(dr.body || '').slice(0, 5000) };
         }
         if ('client' in (b.patch || {})) l.client = { ...(l.client || {}), ...b.patch.client };
+        if ('deal' in (b.patch || {})) {
+          const dl = b.patch.deal || {};
+          const money = (v) => Math.max(0, Math.round(Number(v) || 0));
+          l.deal = { service: String(dl.service || '').trim().slice(0, 120), monthly: money(dl.monthly), oneTime: money(dl.oneTime), next: String(dl.next || '').trim().slice(0, 400) };
+          if (l.client) l.client.monthly = l.deal.monthly;
+        }
         l.updatedAt = Date.now();
         break;
       }

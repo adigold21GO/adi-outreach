@@ -157,19 +157,20 @@ function route() {
 function render() {
   if (!D) return;
   const { name } = route();
+  const nav = name === 'clients' ? 'revenue' : name;
   const replies = D.leads.filter((l) => l.needsResponse).length;
   const callbacksDue = D.leads.filter((l) => l.callbackAt && l.callbackAt <= Date.now() + 864e5 && !['client', 'lost', 'do_not_contact'].includes(l.status)).length;
-  const views = { today: vToday, dialer: vDialer, leads: vLeads, pipeline: vPipeline, results: vResults, clients: vClients, templates: vTemplates, import: vImport, settings: vSettings };
+  const views = { today: vToday, dialer: vDialer, leads: vLeads, pipeline: vPipeline, results: vResults, revenue: vRevenue, clients: vRevenue, templates: vTemplates, import: vImport, settings: vSettings };
   const groups = [
     ['Work', [['today', 'Today', replies], ['dialer', 'Calls', callbacksDue], ['leads', 'Leads'], ['pipeline', 'Pipeline']]],
-    ['Track', [['results', 'Results'], ['clients', 'Clients']]],
+    ['Track', [['results', 'Results'], ['revenue', 'Revenue']]],
     ['Setup', [['templates', 'Templates'], ['import', 'Import'], ['settings', 'Settings']]],
   ];
   const pct = Math.min(100, Math.round((D.sentToday / Math.max(1, D.settings.dailyCap)) * 100));
   const scroll = $('main')?.scrollTop;
   root.innerHTML = `<div class="app">
     <nav class="side" aria-label="Main">${brand()}
-      ${groups.map(([g, items]) => `<div class="group"><div class="gname">${g}</div>${items.map(([k, label, c]) => `<a href="#${k}" class="${name === k ? 'on' : ''}"${name === k ? ' aria-current="page"' : ''}><span>${label}</span>${c ? `<span class="count">${c}</span>` : ''}</a>`).join('')}</div>`).join('')}
+      ${groups.map(([g, items]) => `<div class="group"><div class="gname">${g}</div>${items.map(([k, label, c]) => `<a href="#${k}" class="${nav === k ? 'on' : ''}"${nav === k ? ' aria-current="page"' : ''}><span>${label}</span>${c ? `<span class="count">${c}</span>` : ''}</a>`).join('')}</div>`).join('')}
       <div class="foot"><div class="meter"><div style="width:${pct}%"></div></div><b>${D.sentToday} of ${D.settings.dailyCap}</b> emails sent today
         <div class="muted">${D.gmail.connected ? esc(D.gmail.email) : '<a href="#settings">Connect Gmail</a>'}</div><div class="muted">Inbox checked ${ago(D.sync?.lastSyncAt)}</div></div>
     </nav>
@@ -460,8 +461,13 @@ function drawer() {
       <div class="row" style="margin-top:8px"><button class="btn" data-act="saveLead">Save changes</button>
       ${l.phone ? `<a class="btn" href="tel:${esc(l.phone.replace(/[^\d+]/g, ''))}">Call ${esc(l.phone)}</a>` : ''}</div></div>
 
-    ${l.status === 'client' ? `<div class="section"><h2>Client</h2><div class="fields"><div><label>Monthly value ($)</label><input id="cMonthly" type="number" min="0" value="${esc(l.client?.monthly || 0)}"></div><div><label>Client since</label><input id="cSince" type="date" value="${l.client?.since ? dayKey(l.client.since) : ''}"></div></div>
-      <label>Client notes</label><textarea id="cNotes">${esc(l.client?.notes || '')}</textarea><div style="margin-top:8px"><button class="btn" data-act="saveClient">Save</button></div></div>` : ''}
+    ${['meeting', 'client'].includes(l.status) ? `<div class="section"><h2>Deal</h2><div class="fields">
+      <div><label>What we're selling</label><input id="dlService" value="${esc(l.deal?.service || '')}" placeholder="e.g. AI call agent"></div>
+      <div><label>Monthly price ($)</label><input id="dlMonthly" type="number" min="0" value="${esc(monthlyOf(l) || '')}" placeholder="0"></div>
+      <div><label>One-time price ($)</label><input id="dlOneTime" type="number" min="0" value="${esc(l.deal?.oneTime || '')}" placeholder="0"></div>
+      ${l.status === 'client' ? `<div><label>Client since</label><input id="cSince" type="date" value="${l.client?.since ? dayKey(l.client.since) : ''}"></div>` : ''}</div>
+      <label>Where it stands (shown on the Revenue page)</label><textarea id="dlNext" style="min-height:60px" placeholder="e.g. Demo Fri Nov 20. Wants to hear the voice first.">${esc(dealNote(l))}</textarea>
+      <div style="margin-top:8px"><button class="btn" data-act="saveDeal">Save deal</button></div></div>` : ''}
 
     ${manualOnly(l) ? `<div class="section"><h2>Personal email (manual only)</h2>
       <p class="muted small">This lead is never emailed by Autopilot or a batch send. Edit the draft, then send it yourself. Your signature is added under it${UT_SECS.has(secOf(l)) ? ", starting with Hook 'Em!" : ''}.</p>
@@ -494,7 +500,7 @@ function vPipeline() {
   const rep = emailed.filter(replied);
   const meetings = D.leads.filter((l) => ['meeting', 'client'].includes(l.status));
   const clients = D.leads.filter((l) => l.status === 'client');
-  const mrr = clients.reduce((n, l) => n + (Number(l.client?.monthly) || 0), 0);
+  const mrr = clients.reduce((n, l) => n + monthlyOf(l), 0);
   const bounced = D.leads.filter((l) => l.status === 'bounced').length;
   const days = []; for (let i = 13; i >= 0; i--) days.push(dayKey(Date.now() - i * 864e5));
   const series = Object.fromEntries(days.map((d) => [d, { e: 0, r: 0, c: 0 }]));
@@ -604,15 +610,47 @@ function vResults() {
   </div>`;
 }
 
-// ---------- Clients ----------
-function vClients() {
-  const clients = D.leads.filter((l) => l.status === 'client');
-  const mrr = clients.reduce((n, l) => n + (Number(l.client?.monthly) || 0), 0);
-  return `<h1>Clients</h1><p class="sub">Leads you've moved to Client, from the lead panel or the pipeline board.</p>
-  <div class="kpis"><div class="kpi"><div class="n">${clients.length}</div><div class="l">Clients</div></div><div class="kpi"><div class="n">$${mrr.toLocaleString()}</div><div class="l">Monthly revenue</div></div></div>
-  ${clients.length ? `<div class="tablewrap"><table><thead><tr><th>Company</th><th>Contact</th><th>Since</th><th>Monthly</th><th>Notes</th></tr></thead><tbody>
-  ${clients.map((l) => `<tr data-lead="${l.id}"><td><b>${esc(l.company)}</b></td><td>${esc(person(l))}<div class="muted small">${esc(l.email)} ${esc(l.phone || '')}</div></td><td>${l.client?.since ? new Date(l.client.since).toLocaleDateString() : '—'}</td><td>$${Number(l.client?.monthly || 0).toLocaleString()}</td><td class="small">${esc(l.client?.notes || '')}</td></tr>`).join('')}
-  </tbody></table></div>` : '<div class="card empty">No clients yet.</div>'}`;
+// ---------- Revenue ----------
+function monthlyOf(l) { return Number(l.deal?.monthly ?? l.client?.monthly) || 0; }
+function oneTimeOf(l) { return Number(l.deal?.oneTime) || 0; }
+function dealNote(l) { return l.deal?.next || l.client?.notes || ''; }
+function priced(l) { return monthlyOf(l) > 0 || oneTimeOf(l) > 0; }
+function money(n) { return `$${Math.round(n).toLocaleString()}`; }
+function priceText(l) {
+  const parts = [];
+  if (monthlyOf(l)) parts.push(`${money(monthlyOf(l))}/mo`);
+  if (oneTimeOf(l)) parts.push(`${money(oneTimeOf(l))} one-time`);
+  return parts.join(' + ');
+}
+function dealCard(l, stage) {
+  const who = [person(l), l.industry].filter(Boolean).join(' · ');
+  return `<div class="deal" data-lead="${l.id}">
+    <div class="deal-top"><b>${esc(l.company)}</b>${priced(l) ? `<span class="price">${priceText(l)}</span>` : '<span class="price none">No price yet</span>'}</div>
+    <div class="deal-meta">${esc(l.deal?.service || 'Service not set')} · ${stage}${who ? ` · ${esc(who)}` : ''}</div>
+    <div class="deal-note">${dealNote(l) ? esc(dealNote(l)) : '<span class="muted">Open this deal to add where it stands.</span>'}</div>
+  </div>`;
+}
+function vRevenue() {
+  const closing = D.leads.filter((l) => l.status === 'meeting').sort((a, b) => lastTouch(b) - lastTouch(a));
+  const active = D.leads.filter((l) => l.status === 'client').sort((a, b) => (b.client?.since || 0) - (a.client?.since || 0));
+  const mrr = active.reduce((n, l) => n + monthlyOf(l), 0);
+  const paying = active.filter((l) => monthlyOf(l) > 0).length;
+  const won = active.reduce((n, l) => n + oneTimeOf(l), 0);
+  const open = closing.filter(priced);
+  const openValue = open.reduce((n, l) => n + monthlyOf(l) + oneTimeOf(l), 0);
+  const noPrice = [...closing, ...active].filter((l) => !priced(l)).length;
+  const kpi = (label, n, sub) => `<div class="rkpi"><div class="l">${label}</div><div class="n">${n}</div><div class="s">${sub}</div></div>`;
+  const group = (title, list, stage, empty) => `<h2 class="rhead">${title} <span>${list.length}</span></h2>
+    ${list.length ? list.map((l) => dealCard(l, stage)).join('') : `<div class="deal empty-deal">${empty}</div>`}`;
+  return `<div class="rtitle"><h1>Revenue</h1><p class="sub">What is paying, what is close, and what still needs a price</p></div>
+  <div class="rkpis">
+    ${kpi('Monthly recurring', money(mrr), `${paying} active monthly`)}
+    ${kpi('Closed won', money(won), `${active.length} won in the pipeline`)}
+    ${kpi('Open pipeline value', money(openValue), `${open.length} ${open.length === 1 ? 'deal' : 'deals'} with a value set`)}
+    ${kpi('Deals with no price', noPrice, noPrice ? 'Price these first' : 'Every deal has a price')}
+  </div>
+  ${group('Closing', closing, 'Closing', 'No deals closing. Leads show up here when you move them to Meeting.')}
+  ${group('Active', active, 'Active', 'No active clients yet. Leads show up here when you move them to Client.')}`;
 }
 
 // ---------- Templates ----------
@@ -869,7 +907,11 @@ root.addEventListener('click', async (e) => {
       const patch = {}; for (const el of $$('.drawer [data-f]')) patch[el.dataset.f] = el.value;
       return act('updateLead', { id: UI.lead, patch });
     }); break;
-    case 'saveClient': busy(() => act('updateLead', { id: UI.lead, patch: { client: { monthly: Number($('#cMonthly').value) || 0, since: $('#cSince').value ? new Date(`${$('#cSince').value}T12:00:00`).getTime() : Date.now(), notes: $('#cNotes').value } } })); break;
+    case 'saveDeal': busy(() => {
+      const patch = { deal: { service: $('#dlService').value, monthly: Number($('#dlMonthly').value) || 0, oneTime: Number($('#dlOneTime').value) || 0, next: $('#dlNext').value } };
+      if ($('#cSince')) patch.client = { since: $('#cSince').value ? new Date(`${$('#cSince').value}T12:00:00`).getTime() : Date.now() };
+      return act('updateLead', { id: UI.lead, patch });
+    }); break;
     case 'sendOne': busy(async () => {
       const l = D.leads.find((x) => x.id === UI.lead);
       if (!confirm(`Send this email to ${l.email}?`)) return;
